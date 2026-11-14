@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { getRouterStatus, isRouterConfigured } from "./router.js";
 
@@ -7,6 +7,7 @@ const PORT = Number(process.env.PORT || 10000);
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "https://skynetht-wifi.vercel.app";
+const TRANZAK_API_URL = "https://api.tranzak.co/api/gateway/v1";
 
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -21,6 +22,17 @@ function send(res, status, data, origin) {
     ...(origin ? { "Access-Control-Allow-Origin": origin, "Vary": "Origin" } : {}),
   });
   res.end(JSON.stringify(data));
+}
+
+async function readRawBody(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 16_384) throw new Error("Request body too large");
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
 async function readBody(req) {
@@ -59,6 +71,50 @@ async function requireUser(req, res, origin, admin = false) {
   return user;
 }
 
+async function finalizeTranzakPayment(payment, providerPayment) {
+  const transactionId = String(providerPayment?.transaction_id || "");
+  const reference = String(providerPayment?.reference || "");
+  const providerData = payment?.provider_payload || {};
+  const amount = Number(providerPayment?.amount);
+  const currency = String(providerPayment?.currency || "");
+  const method = String(providerPayment?.payment_method || "");
+  if (!payment || providerData.provider !== "tranzak"
+      || transactionId !== String(payment.provider_reference || "")
+      || reference !== String(payment.id)
+      || !Number.isFinite(amount)
+      || Math.round(amount * 100) !== Math.round(Number(providerData.amount) * 100)
+      || currency !== String(providerData.currency)
+      || method !== String(providerData.payment_method)) {
+    throw new Error("TRANZAK_PAYMENT_MISMATCH");
+  }
+
+  if (providerPayment.status === "failed") {
+    if (payment.status === "pending") {
+      const { error } = await supabase.from("payments")
+        .update({ status: "rejected", verified_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+          provider_payload: { ...providerData, final_status: "failed", failure_reason: providerPayment.failure_reason || null } })
+        .eq("id", payment.id).eq("status", "pending");
+      if (error) throw error;
+    }
+    return { status: payment.status === "confirmed" ? "confirmed" : "rejected" };
+  }
+
+  if (providerPayment.status !== "completed") return { status: payment.status };
+  const ticketCode = createTicketCode();
+  const codeHash = createHash("sha256").update(ticketCode, "utf8").digest("hex");
+  const { data: result, error } = await supabase.rpc("tranzak_confirm_wifi_payment", {
+    p_payment_id: payment.id,
+    p_transaction_id: transactionId,
+    p_amount: amount,
+    p_currency: currency,
+    p_payment_method: method,
+    p_code_hash: codeHash,
+    p_router_username: ticketCode,
+  });
+  if (error) throw error;
+  return { status: "confirmed", result: result?.result || "confirmed" };
+}
+
 const server = createServer(async (req, res) => {
   const origin = req.headers.origin;
   if (origin && origin !== ALLOWED_ORIGIN) {
@@ -88,6 +144,43 @@ const server = createServer(async (req, res) => {
       }, origin);
       return;
     }
+    if (req.method === "POST" && url.pathname === "/webhooks/tranzak") {
+      const secret = process.env.TRANZAK_WEBHOOK_SECRET;
+      if (!secret) { send(res, 503, { error: "TRANZAK_WEBHOOK_NOT_CONFIGURED" }); return; }
+      const raw = await readRawBody(req);
+      const signature = String(req.headers["x-tranzak-signature"] || "");
+      const expected = createHmac("sha256", secret).update(raw).digest("hex");
+      const valid = signature.length === expected.length
+        && /^[a-f0-9]+$/i.test(signature)
+        && timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signature, "hex"));
+      if (!valid) { send(res, 403, { error: "INVALID_WEBHOOK_SIGNATURE" }); return; }
+      const event = JSON.parse(raw.toString("utf8"));
+      const headerEvent = String(req.headers["x-tranzak-event"] || "");
+      if (!["payment.success", "payment.failed"].includes(event?.event)
+          || (headerEvent && headerEvent !== event.event)
+          || !event?.data?.transaction_id) {
+        send(res, 400, { error: "INVALID_WEBHOOK_EVENT" }); return;
+      }
+      if (!supabase) { send(res, 503, { error: "BACKEND_CONFIGURATION_REQUIRED" }); return; }
+      const { data: payment, error } = await supabase.from("payments")
+        .select("id,status,plan_id,user_id,provider_reference,provider_payload")
+        .eq("provider_reference", String(event.data.transaction_id))
+        .maybeSingle();
+      if (error) throw error;
+      if (!payment) { send(res, 200, { received: true, ignored: true }); return; }
+      if (event.event === "payment.success") {
+        await finalizeTranzakPayment(payment, event.data);
+      } else if (payment.status === "pending" && payment.provider_payload?.provider === "tranzak") {
+        const { error: updateError } = await supabase.from("payments")
+          .update({ status: "rejected", verified_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+            provider_payload: { ...payment.provider_payload, final_status: "failed", failure_reason: event.data.failure_reason || null } })
+          .eq("id", payment.id).eq("status", "pending");
+        if (updateError) throw updateError;
+      }
+      send(res, 200, { received: true });
+      return;
+    }
+
     if (!supabase) {
       send(res, 503, { error: "BACKEND_CONFIGURATION_REQUIRED" }, origin);
       return;
@@ -145,12 +238,27 @@ const server = createServer(async (req, res) => {
         return;
       }
       const { data: plan, error: planError } = await supabase
-        .from("wifi_plans").select("id,price,currency,is_active").eq("id", body.planId).maybeSingle();
+        .from("wifi_plans").select("id,price,currency,is_active,name").eq("id", body.planId).maybeSingle();
       if (planError) throw planError;
       if (!plan || !plan.is_active || plan.price == null || Number(plan.price) <= 0) {
         send(res, 409, { error: "PLAN_NOT_PURCHASABLE" }, origin);
         return;
       }
+
+      const useTranzak = ["moncash", "natcash"].includes(body.paymentMethod);
+      if (useTranzak && (!process.env.TRANZAK_API_KEY || !process.env.TRANZAK_WEBHOOK_SECRET)) {
+        send(res, 503, { error: "TRANZAK_NOT_CONFIGURED" }, origin);
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles").select("full_name").eq("id", user.id).maybeSingle();
+      if (profileError) throw profileError;
+      const customerName = profile?.full_name?.trim() || user.email?.split("@")[0] || "Client SkynetHT";
+      const phoneDigits = body.customerPhone.replace(/\\D/g, "");
+      const customerPhone = phoneDigits.length === 8 ? `+509${phoneDigits}`
+        : phoneDigits.startsWith("509") && phoneDigits.length === 11 ? `+${phoneDigits}` : undefined;
+
       const { data: payment, error } = await supabase.from("payments").insert({
         user_id: user.id,
         plan_id: plan.id,
@@ -158,11 +266,98 @@ const server = createServer(async (req, res) => {
         currency: plan.currency,
         payment_method: body.paymentMethod,
         customer_phone: body.customerPhone.trim(),
-        payment_reference: typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0, 120) : null,
+        payment_reference: useTranzak ? null : (typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0, 120) : null),
+        provider_payload: useTranzak ? { provider: "tranzak", state: "creating" } : {},
         status: "pending",
       }).select("id,amount,currency,payment_method,status,created_at").single();
       if (error) throw error;
+
+      if (useTranzak) {
+        let providerResponse;
+        let providerBody = {};
+        try {
+          providerResponse = await fetch(`${TRANZAK_API_URL}/payments`, {
+            method: "POST",
+            headers: { "X-Api-Key": process.env.TRANZAK_API_KEY, "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({
+              amount: Number(plan.price),
+              currency: plan.currency,
+              payment_method: body.paymentMethod,
+              customer_name: customerName,
+              customer_email: user.email || undefined,
+              customer_phone: customerPhone,
+              reference: payment.id,
+              description: `SkynetHT Wi-Fi - ${plan.name || "Forfait"}`,
+              metadata: { payment_id: payment.id, user_id: user.id },
+            }),
+            signal: AbortSignal.timeout(15000),
+          });
+          providerBody = await providerResponse.json().catch(() => ({}));
+          if (!providerResponse.ok || !providerBody.transaction_id || !providerBody.payment_url) {
+            throw new Error(providerBody.message || providerBody.error || `TRANZAK_HTTP_${providerResponse.status}`);
+          }
+          const paymentUrl = new URL(providerBody.payment_url);
+          if (paymentUrl.protocol !== "https:") throw new Error("INVALID_TRANZAK_PAYMENT_URL");
+          const providerAmount = Number(providerBody.amount);
+          if (!Number.isFinite(providerAmount) || !["HTG", "USD"].includes(providerBody.currency)) {
+            throw new Error("INVALID_TRANZAK_RESPONSE");
+          }
+          const payload = {
+            provider: "tranzak",
+            reference: payment.id,
+            transaction_id: String(providerBody.transaction_id),
+            amount: String(providerBody.amount),
+            currency: String(providerBody.currency),
+            payment_method: body.paymentMethod,
+            provider_status: String(providerBody.status || "processing"),
+          };
+          const { error: saveError } = await supabase.from("payments").update({
+            provider_reference: String(providerBody.transaction_id),
+            provider_payload: payload,
+            updated_at: new Date().toISOString(),
+          }).eq("id", payment.id).eq("status", "pending");
+          if (saveError) throw saveError;
+          send(res, 201, { payment, paymentUrl: paymentUrl.toString(), provider: "tranzak" }, origin);
+          return;
+        } catch (providerError) {
+          await supabase.from("payments").update({
+            status: "rejected", updated_at: new Date().toISOString(),
+            provider_payload: { provider: "tranzak", state: "creation_failed", error: String(providerError?.message || "PROVIDER_ERROR").slice(0, 180) },
+          }).eq("id", payment.id).eq("status", "pending");
+          console.error("Tranzak payment creation failed:", providerError?.message || providerError);
+          send(res, 502, { error: "TRANZAK_PAYMENT_CREATION_FAILED" }, origin);
+          return;
+        }
+      }
+
       send(res, 201, { payment }, origin);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/payments/reconcile") {
+      const user = await requireUser(req, res, origin);
+      if (!user) return;
+      if (!process.env.TRANZAK_API_KEY) { send(res, 503, { error: "TRANZAK_NOT_CONFIGURED" }, origin); return; }
+      const body = await readBody(req);
+      const transactionId = typeof body.transactionId === "string" ? body.transactionId : "";
+      if (!/^\\d{6,30}$/.test(transactionId)) { send(res, 400, { error: "INVALID_TRANSACTION_ID" }, origin); return; }
+      const { data: payment, error } = await supabase.from("payments")
+        .select("id,status,plan_id,user_id,provider_reference,provider_payload")
+        .eq("provider_reference", transactionId).eq("user_id", user.id).maybeSingle();
+      if (error) throw error;
+      if (!payment || payment.provider_payload?.provider !== "tranzak") {
+        send(res, 404, { error: "PAYMENT_NOT_FOUND" }, origin); return;
+      }
+      const providerResponse = await fetch(`${TRANZAK_API_URL}/payments/${encodeURIComponent(transactionId)}`, {
+        headers: { "X-Api-Key": process.env.TRANZAK_API_KEY, Accept: "application/json" },
+        signal: AbortSignal.timeout(12000),
+      });
+      const providerBody = await providerResponse.json().catch(() => ({}));
+      if (!providerResponse.ok || !providerBody.data) {
+        send(res, 502, { error: "TRANZAK_STATUS_CHECK_FAILED" }, origin); return;
+      }
+      const result = await finalizeTranzakPayment(payment, providerBody.data);
+      send(res, 200, { paymentId: payment.id, status: result.status }, origin);
       return;
     }
 
