@@ -128,3 +128,9 @@
   .customer-settings-form .button{width:100%}
   .customer-view-heading h2{font-size:24px}
 }
+
+
+.customer-back-button{display:inline-flex;align-items:center;gap:7px;border:0;background:transparent;color:#28658e;padding:7px 0;margin:0 0 15px;font-size:12px;font-weight:800;cursor:pointer}
+.customer-back-button:hover{color:#087bd2}
+.customer-account-actions{display:flex;justify-content:flex-end;padding:4px 0 12px}
+.customer-account-actions .button{display:inline-flex;align-items:center;gap:8px}
