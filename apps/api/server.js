@@ -114,6 +114,27 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/my/records") {
+      const user = await requireUser(req, res, origin);
+      if (!user) return;
+      const [paymentResult, ticketResult] = await Promise.all([
+        supabase.from("payments")
+          .select("id,amount,currency,payment_method,customer_phone,payment_reference,status,created_at,wifi_plans(name,code)")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(50),
+        supabase.from("wifi_tickets")
+          .select("id,router_username,status,issued_at,activated_at,expires_at,created_at,wifi_plans(name,code,duration_seconds,starts_on_first_login)")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(50),
+      ]);
+      if (paymentResult.error) throw paymentResult.error;
+      if (ticketResult.error) throw ticketResult.error;
+      send(res, 200, { payments: paymentResult.data || [], tickets: ticketResult.data || [] }, origin);
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/payments") {
       const user = await requireUser(req, res, origin);
       if (!user) return;
