@@ -113,6 +113,8 @@ export default function App() {
   const [customers, setCustomers] = useState<Profile[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [tickets, setTickets] = useState<WifiTicket[]>([]);
+  const [myPayments, setMyPayments] = useState<Payment[]>([]);
+  const [myTickets, setMyTickets] = useState<WifiTicket[]>([]);
   const [adminPlans, setAdminPlans] = useState<Plan[]>([]);
   const [ticketPlanId, setTicketPlanId] = useState("");
   const [ticketCustomerId, setTicketCustomerId] = useState("");
@@ -172,6 +174,18 @@ export default function App() {
     setCatalogLoading(false);
   };
   useEffect(() => { loadPlans(); }, []);
+
+  const loadMyRecords = async () => {
+    if (!session) { setMyPayments([]); setMyTickets([]); return; }
+    try {
+      const records = await api<{ payments: Payment[]; tickets: WifiTicket[] }>("/api/my/records");
+      setMyPayments(records.payments);
+      setMyTickets(records.tickets);
+    } catch (e) { fail((e as Error).message); }
+  };
+  useEffect(() => {
+    if (mode === "customer" && session) loadMyRecords();
+  }, [session?.access_token, mode]);
 
   const loadAdmin = async () => {
     setBusy(true);
@@ -255,6 +269,7 @@ export default function App() {
       });
       setPaymentOpen(false);
       notify(`Demande enregistrée. Référence de demande : ${result.payment.id}`);
+      await loadMyRecords();
     } catch (e) { fail((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -357,6 +372,18 @@ export default function App() {
               </button>)}
             </div>}
             <div className="purchase-strip"><div className="purchase-icon"><Ticket size={22}/></div><div><b>Prêt à faire votre demande ?</b><span>Un ticket est délivré après vérification du paiement.</span></div><button className="button button-primary" disabled={!chosenPlan||chosenPlan.price==null||Number(chosenPlan.price)<=0} onClick={startPurchase}>Continuer <ArrowRight size={16}/></button></div>
+            {session&&<section className="my-records">
+              <div className="section-heading"><div><div className="eyebrow">ESPACE CLIENT</div><h2>Mes demandes et mes tickets</h2><p>Suivez les paiements et retrouvez vos tickets Skynet Wi-Fi.</p></div><button className="button button-outline" onClick={loadMyRecords}><RefreshCw size={14}/> Actualiser</button></div>
+              <div className="my-record-grid">
+                <div className="panel table-panel"><div className="panel-heading"><div><h3>Mes paiements</h3><p>Demandes de paiement récentes.</p></div></div>
+                  {myPayments.length===0?<div className="empty-table"><CreditCard/><span>Aucune demande de paiement.</span></div>:<div className="my-record-list">{myPayments.map(p=><div className="my-record-row" key={p.id}><div><b>{p.wifi_plans?.name||"Forfait Wi-Fi"}</b><small>{date(p.created_at)} · {paymentLabel(p.payment_method)}</small></div><strong>{money(Number(p.amount),p.currency)}</strong><Status value={p.status}/></div>)}</div>}
+                </div>
+                <div className="panel table-panel"><div className="panel-heading"><div><h3>Mes tickets</h3><p>Les codes émis après confirmation.</p></div></div>
+                  {myTickets.length===0?<div className="empty-table"><Ticket/><span>Aucun ticket délivré pour le moment.</span></div>:<div className="my-record-list">{myTickets.map(t=><div className="my-record-row ticket-record" key={t.id}><div><b>{t.router_username||"Code en préparation"}</b><small>{t.wifi_plans?.name||"Forfait Wi-Fi"} · {date(t.issued_at)}</small></div><Status value={t.status}/></div>)}</div>}
+                  <p className="field-help">Les tickets seront utilisables dès que le routeur MikroTik sera installé et connecté.</p>
+                </div>
+              </div>
+            </section>}
           </section>
           <section className="how-section"><div className="section-heading centered"><div className="eyebrow">C’EST SIMPLE</div><h2>Connectez-vous en 3 étapes</h2></div><div className="steps-grid"><div className="step"><span>01</span><div className="step-icon"><Signal/></div><b>Choisissez un forfait</b><p>Sélectionnez une durée et créez votre demande de paiement.</p></div><div className="step"><span>02</span><div className="step-icon"><CreditCard/></div><b>Faites le paiement</b><p>Effectuez le paiement selon le moyen choisi et conservez la référence.</p></div><div className="step"><span>03</span><div className="step-icon"><Ticket/></div><b>Recevez votre ticket</b><p>Après vérification par Skynet, votre code de connexion sera créé.</p></div></div></section>
           <footer className="footer"><Brand/><span>© {new Date().getFullYear()} Skynet Wi-Fi. Tous droits réservés.</span><span>Support : contactez l’administrateur du réseau.</span></footer>
