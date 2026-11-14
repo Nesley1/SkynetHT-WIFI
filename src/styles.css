@@ -55,3 +55,17 @@
 .revenue-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 @media(max-width:760px){.auth-required{min-height:calc(100vh - 65px)}.create-ticket-form{grid-template-columns:1fr}.create-ticket-form .button{width:100%}.plan-editor{align-items:flex-start}.plan-editor .plan-price-edit{order:3}.plan-editor>.button{order:4}.plan-editor>.online-label{order:5}.revenue-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:420px){.plan-price-edit input{width:88px}.revenue-grid .stat-card>strong{font-size:16px}}
+
+.my-records{padding:55px max(7vw,24px);background:#f6f9fc}
+.my-records .section-heading{align-items:center}
+.my-record-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}
+.my-record-list{margin-top:10px}
+.my-record-row{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #eef2f5}
+.my-record-row:last-child{border-bottom:0}
+.my-record-row>div{flex:1;min-width:0}
+.my-record-row b,.my-record-row small{display:block}
+.my-record-row b{font-size:11px;color:#2b465d;overflow-wrap:anywhere}
+.my-record-row small{font-size:9px;color:#94a1ad;margin-top:4px}
+.my-record-row>strong{font-size:10px;color:#344f66;white-space:nowrap}
+.ticket-record{background:#f9fcff;border:1px dashed #dceaf5;border-radius:8px;padding:12px;margin:8px 0}
+@media(max-width:760px){.my-records{padding:40px 18px}.my-record-grid{grid-template-columns:1fr}.my-records .section-heading{display:flex;align-items:flex-start;flex-wrap:wrap}.my-records .section-heading .button{margin-top:10px}}
