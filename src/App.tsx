@@ -1,4 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+
+type TranzakCardSetup = { transactionId: string; clientSecret: string; publishableKey: string };
+declare global {
+  interface Window {
+    TranzakCard?: {
+      mount(options: { containerId: string; clientSecret: string; publishableKey: string }): void;
+      confirm(options: { onSuccess: (paymentIntent: unknown) => void; onError: (error: { message?: string }) => void }): void;
+    };
+  }
+}
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import {
@@ -108,6 +118,8 @@ export default function App() {
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("moncash");
   const [paymentReference, setPaymentReference] = useState("");
+  const [cardPayment, setCardPayment] = useState<TranzakCardSetup | null>(null);
+  const [cardWidgetReady, setCardWidgetReady] = useState(false);
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -306,7 +318,7 @@ export default function App() {
     if (!chosenPlan || !phone.trim()) { fail("Entrez un numéro de téléphone valide."); return; }
     setBusy(true); fail("");
     try {
-      const result = await api<{ payment: Payment; paymentUrl?: string; provider?: string }>("/api/payments", {
+      const result = await api<{ payment: Payment; paymentUrl?: string; provider?: string; cardSetup?: TranzakCardSetup }>("/api/payments", {
         method: "POST",
         body: JSON.stringify({ planId: chosenPlan.id, paymentMethod, customerPhone: phone.trim(), paymentReference: paymentReference.trim() || undefined }),
       });
@@ -314,11 +326,72 @@ export default function App() {
         window.location.assign(result.paymentUrl);
         return;
       }
+      if (result.cardSetup && result.provider === "tranzak") {
+        setCardPayment(result.cardSetup);
+        notify("Formulaire de carte sécurisé prêt. Saisissez votre carte ci-dessous.");
+        return;
+      }
       setPaymentOpen(false);
       notify(`Demande enregistrée. Référence de demande : ${result.payment.id}`);
       await loadMyRecords();
     } catch (e) { fail((e as Error).message); }
     finally { setBusy(false); }
+  };
+
+  useEffect(() => {
+    if (!cardPayment) return;
+    setCardWidgetReady(false);
+    const mountWidget = () => {
+      if (!window.TranzakCard) { fail("Le formulaire de carte Tranzak n’a pas pu être chargé."); return; }
+      window.TranzakCard.mount({
+        containerId: "tranzak-card-element",
+        clientSecret: cardPayment.clientSecret,
+        publishableKey: cardPayment.publishableKey,
+      });
+      setCardWidgetReady(true);
+    };
+    if (window.TranzakCard) {
+      mountWidget();
+      return;
+    }
+    let script = document.querySelector<HTMLScriptElement>('script[data-tranzak-card="true"]');
+    if (!script) {
+      script = document.createElement("script");
+      script.src = "https://api.tranzak.co/js/tranzak-card.js";
+      script.async = true;
+      script.dataset.tranzakCard = "true";
+      script.onload = mountWidget;
+      script.onerror = () => fail("Impossible de charger le formulaire de carte Tranzak.");
+      document.head.appendChild(script);
+    } else {
+      script.addEventListener("load", mountWidget, { once: true });
+    }
+  }, [cardPayment?.transactionId]);
+
+  const confirmCardPayment = () => {
+    if (!cardPayment || !window.TranzakCard) { fail("Le formulaire de carte n’est pas prêt."); return; }
+    setBusy(true); fail("");
+    window.TranzakCard.confirm({
+      onSuccess: async () => {
+        try {
+          const result = await api<{ status: string }>("/api/payments/reconcile", {
+            method: "POST", body: JSON.stringify({ transactionId: cardPayment.transactionId }),
+          });
+          if (result.status === "confirmed") {
+            setPaymentOpen(false); setCardPayment(null);
+            notify("Paiement par carte confirmé. Votre ticket Wi-Fi est disponible.");
+            await loadMyRecords();
+          } else {
+            notify("Carte acceptée. La confirmation finale arrive; votre ticket apparaîtra automatiquement.");
+          }
+        } catch (e) { fail((e as Error).message); }
+        finally { setBusy(false); }
+      },
+      onError: (widgetError) => {
+        fail(widgetError?.message || "Le paiement par carte n’a pas abouti.");
+        setBusy(false);
+      },
+    });
   };
 
   const confirmPayment = async (paymentId: string) => {
@@ -468,7 +541,7 @@ export default function App() {
       )}
 
       {authOpen&&<AuthModal authMode={authMode} setAuthMode={setAuthMode} authEmail={authEmail} setAuthEmail={setAuthEmail} authPassword={authPassword} setAuthPassword={setAuthPassword} fullName={fullName} setFullName={setFullName} phone={phone} setPhone={setPhone} authBusy={authBusy} error={error} onSubmit={handleAuth} onClose={()=>setAuthOpen(false)}/>}{signupConfirmationEmail&&<Modal title="Vérifiez votre boîte e-mail" onClose={()=>setSignupConfirmationEmail("")}><div className="email-confirm-card"><div className="email-confirm-icon"><CheckCircle2 size={30}/></div><h3>Encore une petite étape !</h3><p>Votre compte Skynet Wi-Fi a été créé. Nous venons de vous envoyer un e-mail de confirmation à :</p><strong className="email-confirm-address">{signupConfirmationEmail}</strong><p>Ouvrez cet e-mail et cliquez sur le bouton <b>Confirmer mon adresse e-mail</b> pour activer votre compte. Pensez aussi à vérifier vos courriers indésirables (Spam).</p><button className="button button-primary full-button" disabled={resendBusy} onClick={resendSignupConfirmation}>{resendBusy?"Envoi en cours…":"Renvoyer l’e-mail de confirmation"}</button><p className="field-help">Vous pourrez vous connecter après avoir confirmé votre adresse.</p></div></Modal>}
-      {paymentOpen&&chosenPlan&&<Modal title="Demande de paiement" onClose={()=>setPaymentOpen(false)}><form onSubmit={submitPayment}><p className="modal-lead">{chosenPlan.name} · {formatDuration(chosenPlan.duration_seconds)} · <b>{money(chosenPlan.price,chosenPlan.currency)}</b></p><label className="field-label">Votre numéro de téléphone</label><input className="field-input" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Ex. 4077 0000" inputMode="tel" required/><label className="field-label">Moyen de paiement</label><select className="field-input" value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)}><option value="moncash">MonCash · Paiement sécurisé Tranzak</option><option value="natcash">NatCash · Paiement sécurisé Tranzak</option><option value="cash">Espèces</option><option value="bank_transfer">Virement bancaire</option><option value="other">Autre</option></select>{paymentMethod==="moncash"||paymentMethod==="natcash"?<p className="field-help">Vous serez redirigé vers Tranzak pour effectuer le paiement. Votre ticket sera créé automatiquement après confirmation du paiement.</p>:<><label className="field-label">Référence du paiement (facultatif)</label><input className="field-input" value={paymentReference} onChange={e=>setPaymentReference(e.target.value)} placeholder="Référence de transaction"/><p className="field-help">La demande restera en attente jusqu’à ce que l’administrateur vérifie et confirme la réception des fonds.</p></>}<button className="button button-primary full-button" disabled={busy}>{busy?"Traitement…":paymentMethod==="moncash"||paymentMethod==="natcash"?"Continuer vers Tranzak":"Envoyer la demande"} <ArrowRight size={16}/></button></form></Modal>}
+      {paymentOpen&&chosenPlan&&<Modal title="Demande de paiement" onClose={()=>{setPaymentOpen(false);setCardPayment(null);setCardWidgetReady(false);}}><form onSubmit={submitPayment}><p className="modal-lead">{chosenPlan.name} · {formatDuration(chosenPlan.duration_seconds)} · <b>{money(chosenPlan.price,chosenPlan.currency)}</b></p><label className="field-label">Votre numéro de téléphone</label><input className="field-input" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Ex. 4077 0000" inputMode="tel" required/><label className="field-label">Moyen de paiement</label><select className="field-input" value={paymentMethod} onChange={e=>{setPaymentMethod(e.target.value);setCardPayment(null);setCardWidgetReady(false);}}><option value="moncash">MonCash · Paiement sécurisé Tranzak</option><option value="natcash">NatCash · Paiement sécurisé Tranzak</option><option value="card">Carte Visa / Mastercard · Tranzak</option><option value="cash">Espèces</option><option value="bank_transfer">Virement bancaire</option><option value="other">Autre</option></select>{paymentMethod==="moncash"||paymentMethod==="natcash"?<p className="field-help">Vous serez redirigé vers Tranzak pour effectuer le paiement. Votre ticket sera créé automatiquement après confirmation du paiement.</p>:paymentMethod==="card"?<><p className="field-help">Paiement sécurisé par carte Visa ou Mastercard. Les données de votre carte sont saisies directement dans le formulaire Tranzak et ne passent pas par SkynetHT.</p>{cardPayment&&<div className="card"><div id="tranzak-card-element"></div><button type="button" className="button button-primary full-button" disabled={!cardWidgetReady||busy} onClick={confirmCardPayment}>{busy?"Vérification…":"Payer par carte"} <ArrowRight size={16}/></button></div>}</>:<><label className="field-label">Référence du paiement (facultatif)</label><input className="field-input" value={paymentReference} onChange={e=>setPaymentReference(e.target.value)} placeholder="Référence de transaction"/><p className="field-help">La demande restera en attente jusqu’à ce que l’administrateur vérifie et confirme la réception des fonds.</p></>}<button className="button button-primary full-button" disabled={busy||Boolean(cardPayment)}>{busy?"Traitement…":paymentMethod==="moncash"||paymentMethod==="natcash"?"Continuer vers Tranzak":paymentMethod==="card"?"Préparer le paiement par carte":"Envoyer la demande"} <ArrowRight size={16}/></button></form></Modal>}
       {issuedCode&&<Modal title="Ticket créé" onClose={()=>setIssuedCode("")}><p className="modal-lead">Copiez et conservez ce code. Il ne sera pas réaffiché après fermeture.</p><div className="issued-code">{issuedCode}</div><button className="button button-primary full-button" onClick={()=>navigator.clipboard?.writeText(issuedCode).then(()=>notify("Code copié."))}>Copier le code</button></Modal>}
       {notice&&<Toast message={notice} onClose={()=>setNotice("")}/>}
       {error&&<div className="toast error-toast"><X size={17}/>{error}<button onClick={()=>setError("")}><X size={15}/></button></div>}
