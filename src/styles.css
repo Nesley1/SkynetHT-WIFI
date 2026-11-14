@@ -275,3 +275,34 @@
     padding: 23px 20px 18px;
   }
 }
+
+
+/* Main navigation: visible across the top on laptop and desktop */
+.customer-desktop-nav {
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 1.35vw, 22px);
+}
+.customer-desktop-nav button {
+  border: 0;
+  background: transparent;
+  color: #53697d;
+  padding: 10px 2px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  transition: color .18s, border-color .18s;
+}
+.customer-desktop-nav button:hover,
+.customer-desktop-nav button.active {
+  color: #147bd3;
+  border-bottom-color: #1687df;
+}
+@media (min-width: 761px) {
+  .customer-desktop-nav { display: flex; }
+  .customer-menu-button { display: none !important; }
+}
+@media (max-width: 760px) {
+  .customer-desktop-nav { display: none; }
+}
