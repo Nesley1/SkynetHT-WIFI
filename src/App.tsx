@@ -388,7 +388,6 @@ export default function App() {
       <header className="topbar">
         <Brand />
         <div className="topbar-right">
-          {mode === "customer" && <span className="network-pill"><span className="live-dot" style={{background:apiHealth==="online"?"#20bd83":apiHealth==="offline"?"#d58b47":"#9aa6b2"}} /> {apiHealth==="online"?"Service API disponible":apiHealth==="offline"?"Service API indisponible":"Vérification du service"}</span>}
           {mode === "customer" && canOpenAdminDashboard && <button className="mode-switch" onClick={openAdminDashboard}><LayoutDashboard size={16} /> Dashboard</button>}
           {mode === "admin" && <button className="mode-switch" onClick={() => { window.history.pushState({}, "", "/"); setMode("customer"); }}><Globe2 size={16} /> Portail client</button>}
           {session && <button className="mode-switch" onClick={handleSignOut}><LogOut size={15}/> Déconnexion</button>}
@@ -404,7 +403,7 @@ export default function App() {
               <p>Une connexion simple, rapide et accessible. Choisissez votre forfait et profitez d’Internet avec Skynet Wi-Fi.</p>
               <div className="hero-actions">
                 <button className="button button-primary" onClick={()=>document.getElementById("forfaits")?.scrollIntoView({behavior:"smooth"})}>Voir les forfaits <ArrowRight size={17}/></button>
-                {!session ? <button className="button button-ghost" onClick={()=>openAuth("customer")}>Créer un compte / Connexion</button> : <span className="button button-ghost">Connecté : {profile?.full_name || session.user.email}</span>}
+                {!session ? <button className="button button-ghost" onClick={()=>openAuth("customer")}>Créer un compte / Connexion</button> : <button className="button button-ghost" onClick={()=>document.getElementById("profil-client")?.scrollIntoView({behavior:"smooth"})}>Mon profil : {profile?.full_name || session.user.email}</button>}
               </div>
               <div className="hero-trust"><span><ShieldCheck size={16}/> Paiements vérifiés</span><span><Zap size={16}/> Ticket après confirmation</span></div>
             </div>
