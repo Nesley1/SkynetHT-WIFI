@@ -238,7 +238,7 @@ const server = createServer(async (req, res) => {
       const user = await requireUser(req, res, origin);
       if (!user) return;
       const body = await readBody(req);
-      const allowedMethods = ["cash", "moncash", "natcash", "bank_transfer", "other"];
+      const allowedMethods = ["cash", "moncash", "natcash", "card", "bank_transfer", "other"];
       if (!body.planId || !allowedMethods.includes(body.paymentMethod) || typeof body.customerPhone !== "string" || body.customerPhone.trim().length < 7) {
         send(res, 400, { error: "INVALID_PAYMENT_REQUEST" }, origin);
         return;
