@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import {
-  ArrowRight, CalendarClock, Check, CheckCircle2, Clock3,
+  ArrowLeft, ArrowRight, CalendarClock, Check, CheckCircle2, Clock3,
   CreditCard, Gauge, Globe2, LayoutDashboard, LockKeyhole,
   LogOut, Menu, Plus, Radio, RefreshCw, Search, Settings, ShieldCheck,
   Signal, Ticket, Users, UserRound, ClipboardList, FileText, KeyRound, Wallet, Wifi, X, Zap, Ban,
@@ -149,6 +149,18 @@ export default function App() {
 
   useEffect(() => {
     let alive = true;
+    if (!window.history.state?.skynetWifiView) window.history.replaceState({ ...(window.history.state || {}), skynetWifiView: "home" }, "", window.location.href);
+    const handleCustomerPopState = (event: PopStateEvent) => {
+      const view = event.state?.skynetWifiView;
+      if (view === "home" || view === "account" || view === "tickets" || view === "requests") {
+        setCustomerView(view);
+        setCustomerMenuOpen(false);
+      } else {
+        setCustomerView("home");
+        setCustomerMenuOpen(false);
+      }
+    };
+    window.addEventListener("popstate", handleCustomerPopState);
     supabase.auth.getSession().then(({ data }) => {
       if (alive) setSession(data.session);
     });
@@ -157,7 +169,7 @@ export default function App() {
       if (!nextSession) { setProfile(null); setMode("customer"); }
     });
     fetch(`${API_URL}/health`).then((r) => r.ok ? r.json() : Promise.reject()).then(() => alive && setApiHealth("online")).catch(() => alive && setApiHealth("offline"));
-    return () => { alive = false; listener.subscription.unsubscribe(); };
+    return () => { alive = false; listener.subscription.unsubscribe(); window.removeEventListener("popstate", handleCustomerPopState); };
   }, []);
 
   useEffect(() => {
@@ -275,9 +287,14 @@ export default function App() {
   };
 
   const goCustomerView = (view: "home" | "account" | "tickets" | "requests") => {
+    if (view !== customerView) window.history.pushState({ ...(window.history.state || {}), skynetWifiView: view }, "", window.location.href);
     setCustomerView(view);
     setCustomerMenuOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const returnCustomerPage = () => {
+    if (window.history.state?.skynetWifiView && window.history.state.skynetWifiView !== "home") window.history.back();
+    else goCustomerView("home");
   };
 
   const saveCustomerProfile = async (event: React.FormEvent) => {
@@ -348,7 +365,7 @@ export default function App() {
     finally { setResendBusy(false); }
   };
 
-  const handleSignOut = async () => { await supabase.auth.signOut(); setMode("customer"); setSection("overview"); notify("Vous êtes déconnecté."); };
+  const handleSignOut = async () => { await supabase.auth.signOut(); setMode("customer"); setSection("overview"); setCustomerView("home"); setCustomerMenuOpen(false); window.history.replaceState({ ...(window.history.state || {}), skynetWifiView: "home" }, "", "/"); notify("Vous êtes déconnecté."); };
   const startPurchase = () => {
     if (!chosenPlan || chosenPlan.price == null || Number(chosenPlan.price) <= 0) {
       fail("Ce forfait n’a pas encore de tarif. Contactez le gestionnaire ou choisissez un forfait tarifé.");
@@ -449,7 +466,6 @@ export default function App() {
           {mode === "customer" && <button className="customer-profile-button" aria-label="Mon compte" title="Mon compte" onClick={() => session ? goCustomerView("account") : openAuth("customer")}><UserRound size={19}/></button>}
           {mode === "customer" && session && <button className="customer-menu-button" aria-label="Ouvrir le menu" aria-expanded={customerMenuOpen} onClick={() => setCustomerMenuOpen(v => !v)}><Menu size={22}/></button>}
           {mode === "admin" && <button className="mode-switch" onClick={() => { window.history.pushState({}, "", "/"); setMode("customer"); }}><Globe2 size={16} /> Portail client</button>}
-          {session && <button className="mode-switch" onClick={handleSignOut}><LogOut size={15}/> Déconnexion</button>}
         </div>
       </header>
       {mode === "customer" && customerMenuOpen && session && <div className="customer-menu-backdrop" onClick={() => setCustomerMenuOpen(false)}><nav className="customer-menu-panel" aria-label="Menu client" onClick={e => e.stopPropagation()}><button onClick={() => goCustomerView("account")}><UserRound size={18}/> Mon compte</button><button onClick={() => goCustomerView("tickets")}><ClipboardList size={18}/> Mes tickets</button><button onClick={() => goCustomerView("requests")}><FileText size={18}/> Mes demandes</button></nav></div>}
@@ -482,14 +498,15 @@ export default function App() {
             </form>
           </section>}
           {session && customerView === "account" && <section className="customer-account-section">
-            <div className="customer-view-heading"><div className="eyebrow">ESPACE CLIENT</div><h2>Mon compte</h2><p>Gérez vos coordonnées et la sécurité de votre compte.</p></div>
+            <div className="customer-view-heading"><button className="customer-back-button" onClick={returnCustomerPage}><ArrowLeft size={16}/> Retour</button><div className="eyebrow">ESPACE CLIENT</div><h2>Mon compte</h2><p>Gérez vos coordonnées et la sécurité de votre compte.</p></div>
             {customerNotices.map(n=><div className="panel customer-info-panel" key={n.id}><b>Information importante</b><p>{n.reason}</p><small>{date(n.created_at)}</small></div>)}
             {customerDiscount.percent>0 && <div className="panel customer-info-panel"><b>Votre rabais : {customerDiscount.percent}%</b><p>Cette réduction sera automatiquement appliquée lors de votre paiement.</p></div>}
             <form className="panel customer-settings-form" onSubmit={saveCustomerProfile}><h3>Mes informations</h3><div><label>Nom complet</label><input value={profileNameDraft} onChange={e=>setProfileNameDraft(e.target.value)} required minLength={2}/></div><div><label>Adresse e-mail</label><input value={profile?.email||""} readOnly/></div><div><label>Numéro de téléphone</label><input type="tel" inputMode="tel" value={profilePhoneDraft} onChange={e=>setProfilePhoneDraft(e.target.value)} required minLength={7}/></div><button className="button button-primary" disabled={busy}>Enregistrer mes informations</button></form>
             <form className="panel customer-settings-form" onSubmit={changeCustomerPassword}><h3><KeyRound size={18}/> Changer mon mot de passe</h3><div><label>Mot de passe actuel</label><input type="password" autoComplete="current-password" value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)} required/></div><div><label>Nouveau mot de passe</label><input type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={e=>setNewPassword(e.target.value)} required/><small>8 caractères minimum.</small></div><div><label>Confirmer le nouveau mot de passe</label><input type="password" autoComplete="new-password" minLength={8} value={confirmNewPassword} onChange={e=>setConfirmNewPassword(e.target.value)} required/></div><button className="button button-primary" disabled={busy}>Mettre à jour le mot de passe</button></form>
+            <div className="customer-account-actions"><button className="button button-outline" onClick={handleSignOut}><LogOut size={16}/> Déconnexion</button></div>
           </section>}
-          {session && customerView === "tickets" && <section className="customer-records-page"><div className="customer-view-heading"><div className="eyebrow">ESPACE CLIENT</div><h2>Mes tickets</h2><p>Retrouvez les tickets Wi-Fi créés après confirmation de vos paiements.</p><button className="button button-outline" onClick={loadMyRecords}><RefreshCw size={14}/> Actualiser</button></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Mes tickets Wi-Fi</h3><p>Vos codes de connexion.</p></div></div>{myTickets.length===0?<div className="empty-table"><Ticket/><span>Aucun ticket délivré pour le moment.</span></div>:<div className="my-record-list">{myTickets.map(t=><div className="my-record-row ticket-record" key={t.id}><div><b>{t.router_username||"Code en préparation"}</b><small>{t.wifi_plans?.name||"Forfait Wi-Fi"} · {date(t.issued_at)}</small></div><Status value={t.status}/></div>)}</div>}<p className="field-help">Les tickets seront utilisables dès que le routeur MikroTik sera installé et connecté.</p></div></section>}
-          {session && customerView === "requests" && <section className="customer-records-page"><div className="customer-view-heading"><div className="eyebrow">ESPACE CLIENT</div><h2>Mes demandes</h2><p>Suivez l’état de vos demandes de paiement.</p><button className="button button-outline" onClick={loadMyRecords}><RefreshCw size={14}/> Actualiser</button></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Historique des demandes</h3><p>Les demandes de paiement associées à votre compte.</p></div></div>{myPayments.length===0?<div className="empty-table"><CreditCard/><span>Aucune demande enregistrée.</span></div>:<div className="my-record-list">{myPayments.map(p=><div className="my-record-row" key={p.id}><div><b>{p.wifi_plans?.name||"Forfait Wi-Fi"}</b><small>{date(p.created_at)} · {paymentLabel(p.payment_method)}</small></div><strong>{money(Number(p.amount),p.currency)}</strong><Status value={p.status}/></div>)}</div>}</div></section>}
+          {session && customerView === "tickets" && <section className="customer-records-page"><div className="customer-view-heading"><button className="customer-back-button" onClick={returnCustomerPage}><ArrowLeft size={16}/> Retour</button><div className="eyebrow">ESPACE CLIENT</div><h2>Mes tickets</h2><p>Retrouvez les tickets Wi-Fi créés après confirmation de vos paiements.</p><button className="button button-outline" onClick={loadMyRecords}><RefreshCw size={14}/> Actualiser</button></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Mes tickets Wi-Fi</h3><p>Vos codes de connexion.</p></div></div>{myTickets.length===0?<div className="empty-table"><Ticket/><span>Aucun ticket délivré pour le moment.</span></div>:<div className="my-record-list">{myTickets.map(t=><div className="my-record-row ticket-record" key={t.id}><div><b>{t.router_username||"Code en préparation"}</b><small>{t.wifi_plans?.name||"Forfait Wi-Fi"} · {date(t.issued_at)}</small></div><Status value={t.status}/></div>)}</div>}<p className="field-help">Les tickets seront utilisables dès que le routeur MikroTik sera installé et connecté.</p></div></section>}
+          {session && customerView === "requests" && <section className="customer-records-page"><div className="customer-view-heading"><button className="customer-back-button" onClick={returnCustomerPage}><ArrowLeft size={16}/> Retour</button><div className="eyebrow">ESPACE CLIENT</div><h2>Mes demandes</h2><p>Suivez l’état de vos demandes de paiement.</p><button className="button button-outline" onClick={loadMyRecords}><RefreshCw size={14}/> Actualiser</button></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Historique des demandes</h3><p>Les demandes de paiement associées à votre compte.</p></div></div>{myPayments.length===0?<div className="empty-table"><CreditCard/><span>Aucune demande enregistrée.</span></div>:<div className="my-record-list">{myPayments.map(p=><div className="my-record-row" key={p.id}><div><b>{p.wifi_plans?.name||"Forfait Wi-Fi"}</b><small>{date(p.created_at)} · {paymentLabel(p.payment_method)}</small></div><strong>{money(Number(p.amount),p.currency)}</strong><Status value={p.status}/></div>)}</div>}</div></section>}
           <section className={`plans-section ${customerView !== "home" ? "hidden-customer-view" : ""}`} id="forfaits">
             <div className="section-heading"><div><div className="eyebrow">NOS OFFRES</div><h2>Choisissez votre connexion</h2><p>Les prix affichés proviennent directement du catalogue Skynet Wi-Fi.</p></div><span className="no-price-note">{catalogLoading?"Chargement des forfaits":catalogError?"Catalogue indisponible":"Forfaits synchronisés"}</span></div>
             {catalogError ? <div className="panel error-panel">{catalogError} <button className="button button-outline" onClick={loadPlans}>Réessayer</button></div> : catalogLoading ? <div className="panel empty-table">Chargement des forfaits…</div> : activePlans.length === 0 ? <div className="panel empty-table">Aucun forfait actif pour le moment.</div> : <div className="plan-grid">
