@@ -63,7 +63,7 @@ function statusLabel(status: string) {
   return ({ pending: "En attente", confirmed: "Confirmé", rejected: "Refusé", refunded: "Remboursé", created: "Créé", active: "Actif", expired: "Expiré", blocked: "Bloqué", revoked: "Révoqué" } as Record<string, string>)[status] || status;
 }
 function paymentLabel(method: string) {
-  return ({ cash: "Espèces", moncash: "MonCash", natcash: "NatCash", card: "Carte bancaire", bank_transfer: "Virement bancaire", other: "Autre" } as Record<string, string>)[method] || method;
+  return ({ cash: "Espèces", moncash: "MonCash", natcash: "NatCash", card: "Carte désactivée", bank_transfer: "Virement bancaire", other: "Autre" } as Record<string, string>)[method] || method;
 }
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
