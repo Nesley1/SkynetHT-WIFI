@@ -1,9 +1,8 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
-  Activity, ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3,
-  CalendarClock, Check, CheckCircle2, ChevronDown, CircleHelp,
+  Activity, ArrowRight, CalendarClock, Check, CheckCircle2,
   Clock3, CreditCard, Gauge, Globe2, LayoutDashboard, LifeBuoy,
-  LockKeyhole, LogOut, Menu, MoreHorizontal, Plus, Radio,
+  LockKeyhole, Menu, MoreHorizontal, Plus, Radio,
   Search, Settings, ShieldCheck, Signal, Ticket, Users, Wallet,
   Wifi, X, Zap,
 } from "lucide-react";
@@ -46,7 +45,6 @@ function App() {
   const [period, setPeriod] = useState("7 derniers jours");
 
   const title = navItems.find((item) => item.id === section)?.label ?? "Vue d’ensemble";
-  const filteredCustomers = useMemo(() => ["Jean Pierre", "Marie Charles", "Daniel Joseph", "Sandra Michel"].filter((name) => name.toLowerCase().includes(search.toLowerCase())), [search]);
 
   const submitDemo = (message: string) => {
     setNotice(message);
