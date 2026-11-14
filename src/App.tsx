@@ -125,6 +125,10 @@ export default function App() {
   const [apiHealth, setApiHealth] = useState<"checking" | "online" | "offline">("checking");
   const [routerStatus, setRouterStatus] = useState("Non configuré");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [customerDiscount, setCustomerDiscount] = useState({ percent: 0, source: "none" });
+  const [customerNotices, setCustomerNotices] = useState<{id:string;reason:string;created_at:string}[]>([]);
+  const [profileNameDraft, setProfileNameDraft] = useState("");
+  const [profilePhoneDraft, setProfilePhoneDraft] = useState("");
 
   const notify = (message: string) => { setNotice(message); setError(""); };
   const fail = (message: string) => { setError(message); setNotice(""); };
@@ -147,8 +151,12 @@ export default function App() {
     async function loadProfile() {
       if (!session) { setProfile(null); return; }
       try {
-        const result = await api<{ user: { id: string; email: string }; profile: Profile | null }>("/api/me");
-        if (alive) setProfile({ ...(result.profile || { id: result.user.id, full_name: null, phone: null, role: "customer" }), email: result.user.email });
+        const result = await api<{ user: { id: string; email: string }; profile: Profile | null; discount?: {percent:number;source:string}; notices?: {id:string;reason:string;created_at:string}[] }>("/api/me");
+        if (alive) {
+          const nextProfile = { ...(result.profile || { id: result.user.id, full_name: null, phone: null, role: "customer" }), email: result.user.email };
+          setProfile(nextProfile); setProfileNameDraft(nextProfile.full_name || ""); setProfilePhoneDraft(nextProfile.phone || "");
+          setCustomerDiscount(result.discount || {percent:0,source:"none"}); setCustomerNotices(result.notices || []);
+        }
       } catch (e) {
         if (alive) fail((e as Error).message);
       }
@@ -410,6 +418,17 @@ export default function App() {
             <div className="hero-art" aria-label="Illustration du réseau Wi-Fi"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="signal-core"><Wifi size={66} strokeWidth={1.45}/></div><div className="float-card float-speed"><Gauge size={17}/><div><b>Forfaits flexibles</b><small>Selon votre besoin</small></div></div><div className="float-card float-status"><span className="live-dot" style={{background:"#d58b47"}}/><div><b>Routeur à installer</b><small>Activation après installation</small></div></div><div className="hero-spark spark-a">✦</div><div className="hero-spark spark-b">✧</div></div>
           </section>
 
+          {session && <section className="my-records" id="profil-client">
+            <div className="section-heading"><div><div className="eyebrow">ESPACE CLIENT</div><h2>Mon profil et mes informations</h2><p>Consultez vos coordonnées et les communications de Skynet Wi-Fi.</p></div></div>
+            {customerNotices.map(n=><div className="panel table-panel" key={n.id}><b>Information importante</b><p>{n.reason}</p><small>{date(n.created_at)}</small></div>)}
+            {customerDiscount.percent>0 && <div className="panel table-panel"><b>Votre rabais : {customerDiscount.percent}%</b><p>Cette réduction sera automatiquement appliquée lors de votre paiement.</p></div>}
+            <form className="panel create-ticket-form" onSubmit={async e=>{e.preventDefault();setBusy(true);try{const result=await api<{profile:Profile}>("/api/me",{method:"PATCH",body:JSON.stringify({fullName:profileNameDraft,phone:profilePhoneDraft})});setProfile({...result.profile,email:profile?.email});notify("Votre profil a été mis à jour.");}catch(err){fail((err as Error).message);}finally{setBusy(false);}}}>
+              <div><label>Nom complet</label><input value={profileNameDraft} onChange={e=>setProfileNameDraft(e.target.value)} required minLength={2}/></div>
+              <div><label>Adresse e-mail</label><input value={profile?.email||""} readOnly/></div>
+              <div><label>Téléphone</label><input value={profilePhoneDraft} onChange={e=>setProfilePhoneDraft(e.target.value)} required minLength={7}/></div>
+              <button className="button button-primary" disabled={busy}>Enregistrer mon profil</button>
+            </form>
+          </section>}
           <section className="plans-section" id="forfaits">
             <div className="section-heading"><div><div className="eyebrow">NOS OFFRES</div><h2>Choisissez votre connexion</h2><p>Les prix affichés proviennent directement du catalogue Skynet Wi-Fi.</p></div><span className="no-price-note">{catalogLoading?"Chargement des forfaits":catalogError?"Catalogue indisponible":"Forfaits synchronisés"}</span></div>
             {catalogError ? <div className="panel error-panel">{catalogError} <button className="button button-outline" onClick={loadPlans}>Réessayer</button></div> : catalogLoading ? <div className="panel empty-table">Chargement des forfaits…</div> : activePlans.length === 0 ? <div className="panel empty-table">Aucun forfait actif pour le moment.</div> : <div className="plan-grid">
