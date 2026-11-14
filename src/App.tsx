@@ -88,7 +88,7 @@ function Brand() {
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [mode, setMode] = useState<"customer" | "admin">("customer");
+  const [mode, setMode] = useState<"customer" | "admin">(() => window.location.pathname.replace(/\/$/, "") === "/admin" ? "admin" : "customer");
   const [section, setSection] = useState<Section>("overview");
   const [plans, setPlans] = useState<Plan[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -342,7 +342,7 @@ export default function App() {
         <Brand />
         <div className="topbar-right">
           {mode === "customer" && <span className="network-pill"><span className="live-dot" style={{background:apiHealth==="online"?"#20bd83":apiHealth==="offline"?"#d58b47":"#9aa6b2"}} /> {apiHealth==="online"?"Service API disponible":apiHealth==="offline"?"Service API indisponible":"Vérification du service"}</span>}
-          {mode === "customer" ? <button className="mode-switch" onClick={() => { if (profile?.role === "admin") setMode("admin"); else openAuth("admin"); }}><LayoutDashboard size={16} /> Espace admin</button> : <button className="mode-switch" onClick={() => setMode("customer")}><Globe2 size={16} /> Portail client</button>}
+          {mode === "admin" && <button className="mode-switch" onClick={() => { window.history.pushState({}, "", "/"); setMode("customer"); }}><Globe2 size={16} /> Portail client</button>}
           {session && <button className="mode-switch" onClick={handleSignOut}><LogOut size={15}/> Déconnexion</button>}
         </div>
       </header>
