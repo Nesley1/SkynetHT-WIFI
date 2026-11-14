@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { createClient } from "@supabase/supabase-js";
+import { getRouterStatus, isRouterConfigured } from "./router.js";
 
 const PORT = Number(process.env.PORT || 10000);
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -31,7 +32,7 @@ async function readBody(req) {
 }
 
 async function requireUser(req, res, origin, admin = false) {
-  const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  const token = req.headers.authorization?.replace(/^Bearer\\s+/i, "");
   if (!token || !supabase) {
     send(res, token ? 503 : 401, { error: token ? "API_NOT_CONFIGURED" : "UNAUTHORIZED" }, origin);
     return null;
@@ -73,7 +74,12 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", "http://localhost");
     if (req.method === "GET" && url.pathname === "/health") {
-      send(res, 200, { status: "ok", service: "skynet-wifi-api", supabaseConfigured: Boolean(supabase) }, origin);
+      send(res, 200, {
+        status: "ok",
+        service: "skynet-wifi-api",
+        supabaseConfigured: Boolean(supabase),
+        routerConfigured: isRouterConfigured(),
+      }, origin);
       return;
     }
     if (!supabase) {
@@ -158,6 +164,14 @@ const server = createServer(async (req, res) => {
         .limit(100);
       if (error) throw error;
       send(res, 200, { payments: data || [] }, origin);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/router/status") {
+      const user = await requireUser(req, res, origin, true);
+      if (!user) return;
+      const status = await getRouterStatus();
+      send(res, status.connected || !status.configured ? 200 : 503, status, origin);
       return;
     }
 
