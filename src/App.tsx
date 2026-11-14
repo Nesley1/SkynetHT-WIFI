@@ -11,7 +11,7 @@ import {
 
 const API_URL = (import.meta.env.VITE_API_URL || "https://skynetht-wifi-api.onrender.com").replace(/\/$/, "");
 const AUTH_REDIRECT_URL = "https://skynetht-wifi.vercel.app";
-type Section = "overview" | "customers" | "tickets" | "payments" | "plans" | "settings";
+type Section = "overview" | "customers" | "tickets" | "payments" | "plans" | "benefits" | "settings";
 type Plan = {
   id: string; code: string; name: string; duration_seconds: number;
   price: number | null; currency: "HTG" | "USD"; is_active: boolean;
@@ -42,6 +42,7 @@ const sections: { id: Section; label: string; icon: typeof LayoutDashboard }[] =
   { id: "tickets", label: "Tickets Wi-Fi", icon: Ticket },
   { id: "payments", label: "Paiements", icon: CreditCard },
   { id: "plans", label: "Forfaits", icon: Wallet },
+  { id: "benefits", label: "Rabais & avis", icon: Users },
   { id: "settings", label: "Paramètres", icon: Settings },
 ];
 
