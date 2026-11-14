@@ -66,7 +66,6 @@ function App() {
         return;
       }
       const formatDuration = (seconds: number) => {
-        if (seconds % 2592000 === 0) return `${seconds / 2592000} jours`;
         if (seconds % 86400 === 0) return `${seconds / 86400} jour${seconds / 86400 > 1 ? "s" : ""}`;
         if (seconds % 3600 === 0) return `${seconds / 3600} heure${seconds / 3600 > 1 ? "s" : ""}`;
         return `${Math.round(seconds / 60)} minutes`;
