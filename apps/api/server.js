@@ -145,18 +145,110 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/admin/customers") {
+      const user = await requireUser(req, res, origin, true);
+      if (!user) return;
+      const [{ data: profiles, error }, { data: authData, error: authError }] = await Promise.all([
+        supabase.from("profiles").select("id,full_name,phone,role,created_at").eq("role", "customer").order("created_at", { ascending: false }).limit(200),
+        supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+      ]);
+      if (error) throw error;
+      if (authError) throw authError;
+      const emails = new Map((authData.users || []).map((entry) => [entry.id, entry.email || null]));
+      send(res, 200, { customers: (profiles || []).map((profile) => ({ ...profile, email: emails.get(profile.id) || null })) }, origin);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/plans") {
+      const user = await requireUser(req, res, origin, true);
+      if (!user) return;
+      const { data, error } = await supabase.from("wifi_plans")
+        .select("id,code,name,duration_seconds,price,currency,is_active,display_order,upload_speed_mbps,download_speed_mbps,starts_on_first_login")
+        .order("display_order", { ascending: true });
+      if (error) throw error;
+      send(res, 200, { plans: data || [] }, origin);
+      return;
+    }
+
+    const planUpdateMatch = req.method === "PATCH"
+      ? url.pathname.match(/^\\/api\\/admin\\/plans\\/([0-9a-f-]{36})$/i)
+      : null;
+    if (planUpdateMatch) {
+      const user = await requireUser(req, res, origin, true);
+      if (!user) return;
+      const body = await readBody(req);
+      const updates = {};
+      if (Object.hasOwn(body, "price")) {
+        if (body.price !== null && (!Number.isFinite(Number(body.price)) || Number(body.price) <= 0)) {
+          send(res, 400, { error: "INVALID_PRICE" }, origin);
+          return;
+        }
+        updates.price = body.price === null ? null : Number(body.price);
+      }
+      if (Object.hasOwn(body, "currency")) {
+        if (!["HTG", "USD"].includes(body.currency)) {
+          send(res, 400, { error: "INVALID_CURRENCY" }, origin);
+          return;
+        }
+        updates.currency = body.currency;
+      }
+      if (Object.hasOwn(body, "isActive")) updates.is_active = Boolean(body.isActive);
+      if (Object.hasOwn(body, "uploadSpeedMbps")) {
+        const n = Number(body.uploadSpeedMbps);
+        if (!Number.isFinite(n) || n <= 0) { send(res, 400, { error: "INVALID_SPEED" }, origin); return; }
+        updates.upload_speed_mbps = n;
+      }
+      if (Object.hasOwn(body, "downloadSpeedMbps")) {
+        const n = Number(body.downloadSpeedMbps);
+        if (!Number.isFinite(n) || n <= 0) { send(res, 400, { error: "INVALID_SPEED" }, origin); return; }
+        updates.download_speed_mbps = n;
+      }
+      if (!Object.keys(updates).length) {
+        send(res, 400, { error: "NO_VALID_CHANGES" }, origin);
+        return;
+      }
+      const { data, error } = await supabase.from("wifi_plans").update(updates)
+        .eq("id", planUpdateMatch[1])
+        .select("id,code,name,duration_seconds,price,currency,is_active,display_order,upload_speed_mbps,download_speed_mbps,starts_on_first_login")
+        .single();
+      if (error) throw error;
+      await supabase.from("admin_audit_logs").insert({
+        actor_id: user.id,
+        action: "wifi_plan_updated",
+        entity_type: "wifi_plan",
+        entity_id: data.id,
+        details: updates,
+      });
+      send(res, 200, { plan: data }, origin);
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/admin/summary") {
       const user = await requireUser(req, res, origin, true);
       if (!user) return;
-      const [customers, pending, activeTickets, plans] = await Promise.all([
+      const [customers, pending, confirmed, activeTickets, tickets, plans] = await Promise.all([
         supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer"),
         supabase.from("payments").select("id", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("payments").select("amount,currency").eq("status", "confirmed"),
         supabase.from("wifi_tickets").select("id", { count: "exact", head: true }).eq("status", "active"),
+        supabase.from("wifi_tickets").select("id", { count: "exact", head: true }),
         supabase.from("wifi_plans").select("id", { count: "exact", head: true }).eq("is_active", true),
       ]);
-      const failure = [customers, pending, activeTickets, plans].find((item) => item.error);
+      const failure = [customers, pending, confirmed, activeTickets, tickets, plans].find((item) => item.error);
       if (failure?.error) throw failure.error;
-      send(res, 200, { customers: customers.count || 0, pendingPayments: pending.count || 0, activeTickets: activeTickets.count || 0, activePlans: plans.count || 0 }, origin);
+      const revenue = (confirmed.data || []).reduce((sum, payment) => {
+        if (payment.currency === "HTG") sum.HTG += Number(payment.amount);
+        else sum.USD += Number(payment.amount);
+        return sum;
+      }, { HTG: 0, USD: 0 });
+      send(res, 200, {
+        customers: customers.count || 0,
+        pendingPayments: pending.count || 0,
+        activeTickets: activeTickets.count || 0,
+        totalTickets: tickets.count || 0,
+        activePlans: plans.count || 0,
+        revenue,
+      }, origin);
       return;
     }
 
