@@ -494,12 +494,12 @@ export default function App() {
             {section==="benefits"&&<div className="dashboard-content">
               <div className="section-intro"><div><h2>Rabais et informations clients</h2><p>Gérez les réductions et informez les clients des interruptions de service.</p></div></div>
               <form className="panel create-ticket-form" onSubmit={async e=>{e.preventDefault();setBusy(true);try{await api("/api/admin/customer-benefits/global-discount",{method:"PUT",body:JSON.stringify({percent:Number(globalDiscount)})});notify("Rabais global enregistré.");await loadAdmin();}catch(err){fail((err as Error).message);}finally{setBusy(false);}}}>
-                <div><label>Rabais global (%) — tous les clients</label><input type="number" min="0" max="100" step="0.5" value={globalDiscount} onChange={e=>setGlobalDiscount(e.target.value)}/><small>Mettre 0 pour désactiver le rabais global.</small></div>
+                <div><label>Rabais global (%) — tous les clients</label><input type="number" min="0" max="99.99" step="0.5" value={globalDiscount} onChange={e=>setGlobalDiscount(e.target.value)}/><small>Mettre 0 pour désactiver le rabais global.</small></div>
                 <button className="button button-primary" disabled={busy}>Enregistrer le rabais global</button>
               </form>
               <form className="panel create-ticket-form" onSubmit={async e=>{e.preventDefault();setBusy(true);try{await api("/api/admin/customer-benefits/individual-discount",{method:"PUT",body:JSON.stringify({userId:benefitCustomerId,percent:Number(individualDiscountPercent)})});notify("Rabais individuel enregistré.");await loadAdmin();}catch(err){fail((err as Error).message);}finally{setBusy(false);}}}>
                 <div><label>Client concerné</label><select value={benefitCustomerId} onChange={e=>setBenefitCustomerId(e.target.value)} required><option value="">Choisir un client</option>{customers.map(x=><option key={x.id} value={x.id}>{x.full_name||x.email||x.id} — {x.email||"sans e-mail"}</option>)}</select></div>
-                <div><label>Rabais individuel (%) — 0 pour retirer</label><input type="number" min="0" max="100" step="0.5" value={individualDiscountPercent} onChange={e=>setIndividualDiscountPercent(e.target.value)} required/></div>
+                <div><label>Rabais individuel (%) — 0 pour retirer</label><input type="number" min="0" max="99.99" step="0.5" value={individualDiscountPercent} onChange={e=>setIndividualDiscountPercent(e.target.value)} required/></div>
                 <button className="button button-primary" disabled={busy||!benefitCustomerId}>Appliquer le rabais</button>
               </form>
               <div className="panel table-panel"><div className="panel-heading"><div><h3>Rabais individuels actifs</h3><p>Le rabais individuel remplace le global pour ce client.</p></div></div>
