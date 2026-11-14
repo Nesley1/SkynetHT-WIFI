@@ -32,7 +32,7 @@ async function readBody(req) {
 }
 
 async function requireUser(req, res, origin, admin = false) {
-  const token = req.headers.authorization?.replace(/^Bearer\\s+/i, "");
+  const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
   if (!token || !supabase) {
     send(res, token ? 503 : 401, { error: token ? "API_NOT_CONFIGURED" : "UNAUTHORIZED" }, origin);
     return null;
