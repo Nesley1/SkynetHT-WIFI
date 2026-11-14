@@ -466,6 +466,7 @@ export default function App() {
           {mode === "customer" && <button className="customer-profile-button" aria-label="Mon compte" title="Mon compte" onClick={() => session ? goCustomerView("account") : openAuth("customer")}><UserRound size={19}/></button>}
           {mode === "customer" && session && <button className="customer-menu-button" aria-label="Ouvrir le menu" aria-expanded={customerMenuOpen} onClick={() => setCustomerMenuOpen(v => !v)}><Menu size={22}/></button>}
           {mode === "admin" && <button className="mode-switch" onClick={() => { window.history.pushState({}, "", "/"); setMode("customer"); }}><Globe2 size={16} /> Portail client</button>}
+          {mode === "admin" && session && <button className="mode-switch" onClick={handleSignOut}><LogOut size={15}/> Déconnexion</button>}
         </div>
       </header>
       {mode === "customer" && customerMenuOpen && session && <div className="customer-menu-backdrop" onClick={() => setCustomerMenuOpen(false)}><nav className="customer-menu-panel" aria-label="Menu client" onClick={e => e.stopPropagation()}><button onClick={() => goCustomerView("account")}><UserRound size={18}/> Mon compte</button><button onClick={() => goCustomerView("tickets")}><ClipboardList size={18}/> Mes tickets</button><button onClick={() => goCustomerView("requests")}><FileText size={18}/> Mes demandes</button></nav></div>}
