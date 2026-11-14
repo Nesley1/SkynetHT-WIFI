@@ -1,25 +1,40 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import {
-  Activity, ArrowRight, CalendarClock, Check, CheckCircle2,
-  Clock3, CreditCard, Gauge, Globe2, LayoutDashboard, LifeBuoy,
-  LockKeyhole, Menu, MoreHorizontal, Plus, Radio,
-  Search, Settings, ShieldCheck, Signal, Ticket, Users, Wallet,
-  Wifi, X, Zap,
+  Activity, ArrowRight, CalendarClock, Check, CheckCircle2, Clock3,
+  CreditCard, Gauge, Globe2, LayoutDashboard, LifeBuoy, LockKeyhole,
+  LogOut, Menu, Plus, Radio, RefreshCw, Search, Settings, ShieldCheck,
+  Signal, Ticket, Users, Wallet, Wifi, X, Zap, Ban, RotateCcw,
 } from "lucide-react";
 
-type Plan = { id: string; name: string; duration: string; price: string; detail: string; popular?: boolean; };
+const API_URL = (import.meta.env.VITE_API_URL || "https://skynetht-wifi-api.onrender.com").replace(/\/$/, "");
 type Section = "overview" | "customers" | "tickets" | "payments" | "plans" | "settings";
+type Plan = {
+  id: string; code: string; name: string; duration_seconds: number;
+  price: number | null; currency: "HTG" | "USD"; is_active: boolean;
+  display_order: number; upload_speed_mbps?: number | null;
+  download_speed_mbps?: number | null; starts_on_first_login: boolean;
+};
+type Profile = { id: string; full_name: string | null; phone: string | null; role: string; email?: string | null; created_at?: string };
+type Payment = {
+  id: string; user_id?: string | null; amount: number; currency: string;
+  payment_method: string; customer_phone: string | null; payment_reference: string | null;
+  status: string; created_at: string; wifi_plans?: { name: string; code: string } | null;
+};
+type WifiTicket = {
+  id: string; user_id: string | null; plan_id: string; payment_id: string | null;
+  router_username: string | null; status: string; issued_at: string;
+  activated_at: string | null; expires_at: string | null; created_at: string;
+  wifi_plans?: { name: string; code: string; duration_seconds: number; starts_on_first_login: boolean } | null;
+};
+type Summary = {
+  customers: number; pendingPayments: number; activeTickets: number;
+  totalTickets: number; activePlans: number; revenue: { HTG: number; USD: number };
+};
+type ApiError = Error & { status?: number };
 
-const defaultPlans: Plan[] = [
-  { id: "hour", name: "1 heure", duration: "60 minutes", price: "—", detail: "Pour une connexion rapide" },
-  { id: "day", name: "1 jour", duration: "24 heures", price: "—", detail: "Idéal pour une journée" },
-  { id: "week", name: "7 jours", duration: "7 jours", price: "—", detail: "Une semaine complète", popular: true },
-  { id: "fortnight", name: "15 jours", duration: "15 jours", price: "—", detail: "Pour rester connecté" },
-  { id: "month", name: "30 jours", duration: "30 jours", price: "—", detail: "Notre formule longue durée" },
-];
-
-const navItems: { id: Section; label: string; icon: typeof LayoutDashboard }[] = [
+const sections: { id: Section; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overview", label: "Vue d’ensemble", icon: LayoutDashboard },
   { id: "customers", label: "Clients", icon: Users },
   { id: "tickets", label: "Tickets Wi-Fi", icon: Ticket },
@@ -28,79 +43,292 @@ const navItems: { id: Section; label: string; icon: typeof LayoutDashboard }[] =
   { id: "settings", label: "Paramètres", icon: Settings },
 ];
 
+function formatDuration(seconds: number) {
+  if (seconds % 2592000 === 0) return `${seconds / 2592000} mois`;
+  if (seconds % 86400 === 0) return `${seconds / 86400} jour${seconds / 86400 > 1 ? "s" : ""}`;
+  if (seconds % 3600 === 0) return `${seconds / 3600} heure${seconds / 3600 > 1 ? "s" : ""}`;
+  return `${Math.round(seconds / 60)} minutes`;
+}
+function money(amount: number | null, currency = "HTG") {
+  if (amount == null) return "Prix non défini";
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency }).format(Number(amount));
+}
+function date(value?: string | null) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+function statusLabel(status: string) {
+  return ({ pending: "En attente", confirmed: "Confirmé", rejected: "Refusé", refunded: "Remboursé", created: "Créé", active: "Actif", expired: "Expiré", blocked: "Bloqué", revoked: "Révoqué" } as Record<string, string>)[status] || status;
+}
+function paymentLabel(method: string) {
+  return ({ cash: "Espèces", moncash: "MonCash", natcash: "NatCash", bank_transfer: "Virement bancaire", other: "Autre" } as Record<string, string>)[method] || method;
+}
+async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const response = await fetch(`${API_URL}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      ...(init.headers || {}),
+    },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(body.error || `Erreur API (${response.status})`) as ApiError;
+    error.status = response.status;
+    throw error;
+  }
+  return body as T;
+}
 function Brand() {
   return <div className="brand"><div className="brand-mark"><Wifi size={21} strokeWidth={2.7} /></div><div><strong>skynet<span> wi-fi</span></strong><small>INTERNET • PARTOUT</small></div></div>;
 }
 
-function App() {
-  const [plans, setPlans] = useState<Plan[]>(defaultPlans);
-  const [catalogStatus, setCatalogStatus] = useState<"loading" | "connected" | "fallback">("loading");
+export default function App() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [mode, setMode] = useState<"customer" | "admin">("customer");
   const [section, setSection] = useState<Section>("overview");
-  const [selectedPlan, setSelectedPlan] = useState("week");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [showBuy, setShowBuy] = useState(false);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState("");
+  const [selectedPlan, setSelectedPlan] = useState("");
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authIntent, setAuthIntent] = useState<"customer" | "admin">("customer");
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
-  const [ticketCode, setTicketCode] = useState("");
-  const [notice, setNotice] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState("moncash");
+  const [paymentReference, setPaymentReference] = useState("");
   const [search, setSearch] = useState("");
-  const [period, setPeriod] = useState("7 derniers jours");
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [customers, setCustomers] = useState<Profile[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [tickets, setTickets] = useState<WifiTicket[]>([]);
+  const [adminPlans, setAdminPlans] = useState<Plan[]>([]);
+  const [ticketPlanId, setTicketPlanId] = useState("");
+  const [ticketCustomerId, setTicketCustomerId] = useState("");
+  const [issuedCode, setIssuedCode] = useState("");
+  const [apiHealth, setApiHealth] = useState<"checking" | "online" | "offline">("checking");
+  const [routerStatus, setRouterStatus] = useState("Non configuré");
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const notify = (message: string) => { setNotice(message); setError(""); };
+  const fail = (message: string) => { setError(message); setNotice(""); };
 
   useEffect(() => {
-    let cancelled = false;
-    async function loadPlans() {
-      if (!isSupabaseConfigured) {
-        setCatalogStatus("fallback");
-        return;
-      }
-      const { data, error } = await supabase
-        .from("wifi_plans")
-        .select("code, name, duration_seconds, price, currency, is_active, display_order")
-        .eq("is_active", true)
-        .order("display_order", { ascending: true });
-      if (cancelled) return;
-      if (error || !data?.length) {
-        console.error("Impossible de charger les forfaits Supabase:", error?.message);
-        setCatalogStatus("fallback");
-        return;
-      }
-      const formatDuration = (seconds: number) => {
-        if (seconds % 86400 === 0) return `${seconds / 86400} jour${seconds / 86400 > 1 ? "s" : ""}`;
-        if (seconds % 3600 === 0) return `${seconds / 3600} heure${seconds / 3600 > 1 ? "s" : ""}`;
-        return `${Math.round(seconds / 60)} minutes`;
-      };
-      setPlans(data.map((plan) => ({
-        id: plan.code,
-        name: plan.name,
-        duration: formatDuration(plan.duration_seconds),
-        price: plan.price == null ? "—" : new Intl.NumberFormat("fr-FR", { style: "currency", currency: plan.currency }).format(Number(plan.price)),
-        detail: "Forfait Skynet Wi-Fi",
-        popular: plan.code === "SKY-7D",
-      })));
-      setSelectedPlan((current) => data.some((plan) => plan.code === current) ? current : data[0].code);
-      setCatalogStatus("connected");
-    }
-    loadPlans();
-    return () => { cancelled = true; };
+    let alive = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (alive) setSession(data.session);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      if (!nextSession) { setProfile(null); setMode("customer"); }
+    });
+    fetch(`${API_URL}/health`).then((r) => r.ok ? r.json() : Promise.reject()).then(() => alive && setApiHealth("online")).catch(() => alive && setApiHealth("offline"));
+    return () => { alive = false; listener.subscription.unsubscribe(); };
   }, []);
 
-  const title = navItems.find((item) => item.id === section)?.label ?? "Vue d’ensemble";
+  useEffect(() => {
+    let alive = true;
+    async function loadProfile() {
+      if (!session) { setProfile(null); return; }
+      try {
+        const result = await api<{ user: { id: string; email: string }; profile: Profile | null }>("/api/me");
+        if (alive) setProfile({ ...(result.profile || { id: result.user.id, full_name: null, phone: null, role: "customer" }), email: result.user.email });
+      } catch (e) {
+        if (alive) fail((e as Error).message);
+      }
+    }
+    loadProfile();
+    return () => { alive = false; };
+  }, [session?.access_token]);
 
-  const submitDemo = (message: string) => {
-    setNotice(message);
-    window.setTimeout(() => setNotice(""), 3600);
+  const loadPlans = async () => {
+    setCatalogLoading(true);
+    setCatalogError("");
+    if (!isSupabaseConfigured) {
+      setCatalogError("La connexion Supabase n’est pas configurée.");
+      setCatalogLoading(false);
+      return;
+    }
+    const { data, error: loadError } = await supabase.from("wifi_plans")
+      .select("id,code,name,duration_seconds,price,currency,is_active,display_order,upload_speed_mbps,download_speed_mbps,starts_on_first_login")
+      .eq("is_active", true).order("display_order", { ascending: true });
+    if (loadError) setCatalogError(loadError.message);
+    else {
+      const rows = (data || []) as Plan[];
+      setPlans(rows);
+      if (!selectedPlan || !rows.some((p) => p.id === selectedPlan)) setSelectedPlan(rows[0]?.id || "");
+    }
+    setCatalogLoading(false);
   };
+  useEffect(() => { loadPlans(); }, []);
+
+  const loadAdmin = async () => {
+    setBusy(true);
+    fail("");
+    try {
+      const [s, c, p, t, pl] = await Promise.all([
+        api<Summary>("/api/admin/summary"),
+        api<{ customers: Profile[] }>("/api/admin/customers"),
+        api<{ payments: Payment[] }>("/api/admin/payments"),
+        api<{ tickets: WifiTicket[] }>("/api/admin/tickets"),
+        api<{ plans: Plan[] }>("/api/admin/plans"),
+      ]);
+      setSummary(s); setCustomers(c.customers); setPayments(p.payments); setTickets(t.tickets); setAdminPlans(pl.plans);
+      setTicketPlanId((current) => current || pl.plans.find((plan) => plan.is_active)?.id || "");
+    } catch (e) { fail((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => {
+    if (mode === "admin" && profile?.role === "admin") loadAdmin();
+  }, [mode, profile?.id, profile?.role]);
+
+  useEffect(() => {
+    if (mode !== "admin" || profile?.role !== "admin") return;
+    api<{ configured: boolean; connected: boolean }>("/api/admin/router/status")
+      .then((r) => setRouterStatus(r.connected ? "Connecté" : r.configured ? "Injoignable" : "À configurer"))
+      .catch(() => setRouterStatus("À configurer"));
+  }, [mode, profile?.id]);
+
+  const activePlans = useMemo(() => plans.filter((p) => p.is_active), [plans]);
+  const chosenPlan = plans.find((p) => p.id === selectedPlan);
+  const pageTitle = sections.find((s) => s.id === section)?.label || "Vue d’ensemble";
+
+  const openAuth = (intent: "customer" | "admin") => {
+    setAuthIntent(intent); setAuthMode("login"); setAuthOpen(true); setError(""); setNotice("");
+  };
+  const handleAuth = async (event: React.FormEvent) => {
+    event.preventDefault(); setAuthBusy(true); fail("");
+    try {
+      if (authMode === "signup") {
+        const { data, error: signError } = await supabase.auth.signUp({
+          email: authEmail.trim(), password: authPassword,
+          options: { data: { full_name: fullName.trim(), phone: phone.trim() } },
+        });
+        if (signError) throw signError;
+        if (!data.session) {
+          setAuthOpen(false);
+          notify("Compte créé. Vérifiez votre e-mail pour confirmer l’inscription avant de vous connecter.");
+        } else {
+          setAuthOpen(false);
+          notify("Votre compte est créé.");
+        }
+      } else {
+        const { error: signError } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
+        if (signError) throw signError;
+        setAuthOpen(false);
+        if (authIntent === "admin") setMode("admin");
+        notify("Connexion réussie.");
+      }
+    } catch (e) { fail((e as Error).message); }
+    finally { setAuthBusy(false); }
+  };
+
+  const handleSignOut = async () => { await supabase.auth.signOut(); setMode("customer"); setSection("overview"); notify("Vous êtes déconnecté."); };
+  const startPurchase = () => {
+    if (!chosenPlan || chosenPlan.price == null || Number(chosenPlan.price) <= 0) {
+      fail("Ce forfait n’a pas encore de tarif. Contactez le gestionnaire ou choisissez un forfait tarifé.");
+      return;
+    }
+    if (!session) { openAuth("customer"); return; }
+    setPhone(profile?.phone || "");
+    setPaymentOpen(true); setError("");
+  };
+  const submitPayment = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!chosenPlan || !phone.trim()) { fail("Entrez un numéro de téléphone valide."); return; }
+    setBusy(true); fail("");
+    try {
+      const result = await api<{ payment: Payment }>("/api/payments", {
+        method: "POST",
+        body: JSON.stringify({ planId: chosenPlan.id, paymentMethod, customerPhone: phone.trim(), paymentReference: paymentReference.trim() || undefined }),
+      });
+      setPaymentOpen(false);
+      notify(`Demande enregistrée. Référence de demande : ${result.payment.id}`);
+    } catch (e) { fail((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const confirmPayment = async (paymentId: string) => {
+    if (!window.confirm("Confirmer que vous avez réellement reçu ce paiement ? Un ticket sera créé.")) return;
+    setBusy(true); fail("");
+    try {
+      const result = await api<{ ticket: { code: string } }>(`/api/admin/payments/${paymentId}/confirm`, { method: "POST", body: "{}" });
+      setIssuedCode(result.ticket.code);
+      notify("Paiement confirmé et ticket créé.");
+      await loadAdmin();
+    } catch (e) { fail((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const rejectPayment = async (paymentId: string) => {
+    if (!window.confirm("Refuser cette demande de paiement ?")) return;
+    setBusy(true); fail("");
+    try {
+      await api(`/api/admin/payments/${paymentId}/reject`, { method: "POST", body: "{}" });
+      notify("Demande de paiement refusée."); await loadAdmin();
+    } catch (e) { fail((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const createTicket = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!ticketPlanId) { fail("Sélectionnez un forfait actif."); return; }
+    setBusy(true); fail("");
+    try {
+      const result = await api<{ ticket: { code: string } }>("/api/admin/tickets", {
+        method: "POST", body: JSON.stringify({ planId: ticketPlanId, userId: ticketCustomerId || undefined }),
+      });
+      setIssuedCode(result.ticket.code);
+      notify("Ticket créé. Conservez le code : il ne sera pas réaffiché après fermeture.");
+      await loadAdmin();
+    } catch (e) { fail((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const changeTicketStatus = async (ticket: WifiTicket, status: "created" | "blocked" | "revoked") => {
+    const prompt = status === "revoked" ? "Révoquer définitivement ce ticket ?" : status === "blocked" ? "Bloquer ce ticket ?" : "Réactiver ce ticket dans le registre ?";
+    if (!window.confirm(prompt)) return;
+    setBusy(true); fail("");
+    try {
+      await api(`/api/admin/tickets/${ticket.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      notify(`Statut du ticket modifié : ${statusLabel(status)}.`); await loadAdmin();
+    } catch (e) { fail((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const savePlan = async (plan: Plan, priceText: string) => {
+    const parsed = priceText.trim() === "" ? null : Number(priceText);
+    if (parsed !== null && (!Number.isFinite(parsed) || parsed <= 0)) { fail("Le prix doit être un montant supérieur à zéro."); return; }
+    setBusy(true); fail("");
+    try {
+      const result = await api<{ plan: Plan }>(`/api/admin/plans/${plan.id}`, {
+        method: "PATCH", body: JSON.stringify({ price: parsed, currency: plan.currency }),
+      });
+      setAdminPlans((items) => items.map((p) => p.id === plan.id ? result.plan : p));
+      await loadPlans(); notify(`Tarif de ${plan.name} enregistré.`);
+    } catch (e) { fail((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  if (mode === "admin" && profile?.role !== "admin") {
+    return <div className="app-shell"><header className="topbar"><Brand /><button className="mode-switch" onClick={() => setMode("customer")}><Globe2 size={16} /> Portail client</button></header><main className="auth-required"><div className="panel auth-required-card"><div className="setting-icon"><LockKeyhole /></div><h2>Accès administrateur requis</h2><p>Connectez-vous avec un compte autorisé comme administrateur pour ouvrir la gestion Skynet Wi-Fi.</p><button className="button button-primary" onClick={() => openAuth("admin")}>Connexion administrateur</button></div></main>{authOpen && <AuthModal {...{authMode,setAuthMode,authEmail,setAuthEmail,authPassword,setAuthPassword,fullName,setFullName,phone,setPhone,authBusy,error,onSubmit:handleAuth,onClose:()=>setAuthOpen(false)}} />}{notice && <Toast message={notice} onClose={()=>setNotice("")}/>}</div>;
+  }
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <Brand />
         <div className="topbar-right">
-          <span className="network-pill"><span className="live-dot" /> Réseau disponible</span>
-          <button className="mode-switch" onClick={() => { setMode(mode === "customer" ? "admin" : "customer"); setSection("overview"); }}>
-            {mode === "customer" ? <><LayoutDashboard size={16} /> Espace admin</> : <><Globe2 size={16} /> Portail client</>}
-          </button>
+          {mode === "customer" && <span className="network-pill"><span className="live-dot" style={{background:apiHealth==="online"?"#20bd83":apiHealth==="offline"?"#d58b47":"#9aa6b2"}} /> {apiHealth==="online"?"Service API disponible":apiHealth==="offline"?"Service API indisponible":"Vérification du service"}</span>}
+          {mode === "customer" ? <button className="mode-switch" onClick={() => { if (profile?.role === "admin") setMode("admin"); else openAuth("admin"); }}><LayoutDashboard size={16} /> Espace admin</button> : <button className="mode-switch" onClick={() => setMode("customer")}><Globe2 size={16} /> Portail client</button>}
+          {session && <button className="mode-switch" onClick={handleSignOut}><LogOut size={15}/> Déconnexion</button>}
         </div>
       </header>
 
@@ -109,81 +337,95 @@ function App() {
           <section className="hero">
             <div className="hero-copy">
               <div className="eyebrow"><span className="eyebrow-line" /> INTERNET HAUT DÉBIT À GONAÏVES</div>
-              <h1>Le Wi-Fi qui vous<br /><em>connecte au monde.</em></h1>
+              <h1>Le Wi-Fi qui vous<br/><em>connecte au monde.</em></h1>
               <p>Une connexion simple, rapide et accessible. Choisissez votre forfait et profitez d’Internet avec Skynet Wi-Fi.</p>
               <div className="hero-actions">
-                <button className="button button-primary" onClick={() => setShowBuy(true)}>Choisir un forfait <ArrowRight size={17} /></button>
-                <button className="button button-ghost" onClick={() => setShowLogin(true)}><Ticket size={17} /> J’ai déjà un ticket</button>
+                <button className="button button-primary" onClick={()=>document.getElementById("forfaits")?.scrollIntoView({behavior:"smooth"})}>Voir les forfaits <ArrowRight size={17}/></button>
+                {!session ? <button className="button button-ghost" onClick={()=>openAuth("customer")}>Créer un compte / Connexion</button> : <span className="button button-ghost">Connecté : {profile?.full_name || session.user.email}</span>}
               </div>
-              <div className="hero-trust"><span><ShieldCheck size={16} /> Accès sécurisé</span><span><Zap size={16} /> Activation rapide</span></div>
+              <div className="hero-trust"><span><ShieldCheck size={16}/> Paiements vérifiés</span><span><Zap size={16}/> Ticket après confirmation</span></div>
             </div>
-            <div className="hero-art" aria-label="Illustration du réseau Wi-Fi">
-              <div className="orbit orbit-one" /><div className="orbit orbit-two" />
-              <div className="signal-core"><Wifi size={66} strokeWidth={1.45} /></div>
-              <div className="float-card float-speed"><Gauge size={17} /><div><b>Haut débit</b><small>Connexion fluide</small></div></div>
-              <div className="float-card float-status"><span className="live-dot" /><div><b>Réseau actif</b><small>Skynet Wi-Fi</small></div></div>
-              <div className="hero-spark spark-a">✦</div><div className="hero-spark spark-b">✧</div>
-            </div>
+            <div className="hero-art" aria-label="Illustration du réseau Wi-Fi"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="signal-core"><Wifi size={66} strokeWidth={1.45}/></div><div className="float-card float-speed"><Gauge size={17}/><div><b>Forfaits flexibles</b><small>Selon votre besoin</small></div></div><div className="float-card float-status"><span className="live-dot" style={{background:"#d58b47"}}/><div><b>Routeur à installer</b><small>Activation après installation</small></div></div><div className="hero-spark spark-a">✦</div><div className="hero-spark spark-b">✧</div></div>
           </section>
 
           <section className="plans-section" id="forfaits">
-            <div className="section-heading"><div><div className="eyebrow">NOS OFFRES</div><h2>Choisissez votre connexion</h2><p>Des forfaits adaptés à votre rythme.</p></div><span className="no-price-note">{catalogStatus === "connected" ? "Forfaits synchronisés" : "Tarifs communiqués au point de vente"}</span></div>
-            <div className="plan-grid">
-              {plans.map((plan) => <button key={plan.id} className={`plan-card ${selectedPlan === plan.id ? "selected" : ""}`} onClick={() => setSelectedPlan(plan.id)}>
-                {plan.popular && <span className="popular-tag">POPULAIRE</span>}
-                <span className="plan-icon"><Clock3 size={21} /></span>
-                <strong>{plan.name}</strong><span className="plan-duration">{plan.duration}</span><p>{plan.detail}</p>
-                <span className="plan-select">{selectedPlan === plan.id ? <><Check size={14} /> Sélectionné</> : "Choisir ce forfait"}</span>
+            <div className="section-heading"><div><div className="eyebrow">NOS OFFRES</div><h2>Choisissez votre connexion</h2><p>Les prix affichés proviennent directement du catalogue Skynet Wi-Fi.</p></div><span className="no-price-note">{catalogLoading?"Chargement des forfaits":catalogError?"Catalogue indisponible":"Forfaits synchronisés"}</span></div>
+            {catalogError ? <div className="panel error-panel">{catalogError} <button className="button button-outline" onClick={loadPlans}>Réessayer</button></div> : catalogLoading ? <div className="panel empty-table">Chargement des forfaits…</div> : activePlans.length === 0 ? <div className="panel empty-table">Aucun forfait actif pour le moment.</div> : <div className="plan-grid">
+              {activePlans.map((plan)=><button key={plan.id} className={`plan-card ${selectedPlan===plan.id?"selected":""}`} onClick={()=>setSelectedPlan(plan.id)}>
+                {plan.code==="SKY-7D"&&<span className="popular-tag">POPULAIRE</span>}
+                <span className="plan-icon"><Clock3 size={21}/></span><strong>{plan.name}</strong><span className="plan-duration">{formatDuration(plan.duration_seconds)}</span><p>{plan.price==null?"Tarif en attente de validation":money(plan.price,plan.currency)}</p><span className="plan-select">{selectedPlan===plan.id?<><Check size={14}/> Sélectionné</>:"Choisir ce forfait"}</span>
               </button>)}
-            </div>
-            <div className="purchase-strip"><div className="purchase-icon"><Ticket size={22} /></div><div><b>Prêt à vous connecter ?</b><span>Choisissez un forfait pour commencer votre achat.</span></div><button className="button button-primary" onClick={() => setShowBuy(true)}>Continuer <ArrowRight size={16} /></button></div>
+            </div>}
+            <div className="purchase-strip"><div className="purchase-icon"><Ticket size={22}/></div><div><b>Prêt à faire votre demande ?</b><span>Un ticket est délivré après vérification du paiement.</span></div><button className="button button-primary" disabled={!chosenPlan||chosenPlan.price==null||Number(chosenPlan.price)<=0} onClick={startPurchase}>Continuer <ArrowRight size={16}/></button></div>
           </section>
-
-          <section className="how-section">
-            <div className="section-heading centered"><div className="eyebrow">C’EST SIMPLE</div><h2>Connectez-vous en 3 étapes</h2></div>
-            <div className="steps-grid"><div className="step"><span>01</span><div className="step-icon"><Signal /></div><b>Connectez-vous</b><p>Choisissez le réseau Wi-Fi Skynet sur votre téléphone ou ordinateur.</p></div><div className="step"><span>02</span><div className="step-icon"><CreditCard /></div><b>Choisissez un forfait</b><p>Sélectionnez la durée qui vous convient et suivez les instructions de paiement.</p></div><div className="step"><span>03</span><div className="step-icon"><Zap /></div><b>Profitez d’Internet</b><p>Entrez votre ticket et profitez de votre connexion Skynet Wi-Fi.</p></div></div>
-          </section>
-          <footer className="footer"><Brand /><span>© {new Date().getFullYear()} Skynet Wi-Fi. Tous droits réservés.</span><button onClick={() => submitDemo("Le support sera bientôt disponible.")}><LifeBuoy size={15} /> Assistance</button></footer>
+          <section className="how-section"><div className="section-heading centered"><div className="eyebrow">C’EST SIMPLE</div><h2>Connectez-vous en 3 étapes</h2></div><div className="steps-grid"><div className="step"><span>01</span><div className="step-icon"><Signal/></div><b>Choisissez un forfait</b><p>Sélectionnez une durée et créez votre demande de paiement.</p></div><div className="step"><span>02</span><div className="step-icon"><CreditCard/></div><b>Faites le paiement</b><p>Effectuez le paiement selon le moyen choisi et conservez la référence.</p></div><div className="step"><span>03</span><div className="step-icon"><Ticket/></div><b>Recevez votre ticket</b><p>Après vérification par Skynet, votre code de connexion sera créé.</p></div></div></section>
+          <footer className="footer"><Brand/><span>© {new Date().getFullYear()} Skynet Wi-Fi. Tous droits réservés.</span><span>Support : contactez l’administrateur du réseau.</span></footer>
         </main>
       ) : (
         <div className="admin-layout">
-          <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}>
-            <div className="sidebar-brand"><Brand /><button className="icon-button mobile-only" onClick={() => setMenuOpen(false)}><X /></button></div>
+          <aside className={`sidebar ${menuOpen?"sidebar-open":""}`}>
+            <div className="sidebar-brand"><Brand/><button className="icon-button mobile-only" onClick={()=>setMenuOpen(false)}><X/></button></div>
             <div className="side-label">MENU PRINCIPAL</div>
-            <nav>{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={`nav-item ${section === item.id ? "active" : ""}`} onClick={() => { setSection(item.id); setMenuOpen(false); }}><Icon size={18} /><span>{item.label}</span>{item.id === "payments" && <i className="nav-count">3</i>}</button>; })}</nav>
-            <div className="sidebar-bottom"><div className="router-status"><span className="live-dot" /><div><b>MikroTik</b><small>À configurer</small></div><span className="status-tag">HORS LIGNE</span></div><div className="admin-profile"><div className="avatar">A</div><div><b>Administrateur</b><small>Gestionnaire</small></div><MoreHorizontal size={18} /></div></div>
+            <nav>{sections.map((item)=>{const Icon=item.icon;return <button key={item.id} className={`nav-item ${section===item.id?"active":""}`} onClick={()=>{setSection(item.id);setMenuOpen(false);}}><Icon size={18}/><span>{item.label}</span>{item.id==="payments"&&summary?.pendingPayments ? <i className="nav-count">{summary.pendingPayments}</i>:null}</button>;})}</nav>
+            <div className="sidebar-bottom"><div className="router-status"><span className="live-dot" style={{background:routerStatus==="Connecté"?"#20bd83":"#e5a24b"}}/><div><b>MikroTik</b><small>{routerStatus}</small></div><span className="status-tag">{routerStatus==="Connecté"?"EN LIGNE":"ATTENTE"}</span></div><div className="admin-profile"><div className="avatar">{(profile?.full_name||profile?.email||"A").slice(0,1).toUpperCase()}</div><div><b>{profile?.full_name||"Administrateur"}</b><small>{profile?.email}</small></div></div></div>
           </aside>
           <main className="admin-main">
-            <div className="admin-header"><button className="icon-button mobile-only" onClick={() => setMenuOpen(true)}><Menu /></button><div><div className="breadcrumb">Skynet Wi-Fi <span>/</span> {title}</div><h1>{title}</h1></div><div className="admin-header-actions"><span className="date-label"><CalendarClock size={16} /> {new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</span><button className="admin-avatar">A</button></div></div>
-            {section === "overview" && <div className="dashboard-content">
-              <div className="welcome-row"><div><h2>Bonjour, Administrateur 👋</h2><p>Voici un aperçu de votre activité réseau.</p></div><select value={period} onChange={(e) => setPeriod(e.target.value)}><option>7 derniers jours</option><option>30 derniers jours</option><option>Cette année</option></select></div>
-              <div className="stats-grid"><Stat icon={<Users />} label="Clients actifs" value="—" note="En attente du MikroTik" tone="blue" /><Stat icon={<Ticket />} label="Tickets vendus" value="—" note="Aucune donnée connectée" tone="purple" /><Stat icon={<Wallet />} label="Revenus" value="—" note="À connecter aux paiements" tone="green" /><Stat icon={<Activity />} label="Appareils connectés" value="—" note="Routeur non configuré" tone="orange" /></div>
-              <div className="dashboard-grid"><div className="panel activity-panel"><div className="panel-heading"><div><h3>Activité du réseau</h3><p>État de la connexion MikroTik</p></div><span className="offline-label"><span /> Hors ligne</span></div><div className="empty-chart"><div className="chart-icon"><Radio size={28} /></div><b>En attente de connexion</b><p>Les statistiques apparaîtront ici une fois le routeur MikroTik connecté.</p></div></div><div className="panel quick-panel"><div className="panel-heading"><div><h3>Actions rapides</h3><p>Gérez votre hotspot</p></div></div><button onClick={() => setSection("tickets")}><span className="quick-icon violet"><Plus /></span><span><b>Créer un ticket</b><small>Générer un accès Wi-Fi</small></span><ArrowRight size={16} /></button><button onClick={() => setSection("payments")}><span className="quick-icon green"><CreditCard /></span><span><b>Vérifier les paiements</b><small>Examiner les demandes</small></span><ArrowRight size={16} /></button><button onClick={() => setSection("plans")}><span className="quick-icon blue"><Wallet /></span><span><b>Gérer les forfaits</b><small>Durées et tarifs</small></span><ArrowRight size={16} /></button></div></div>
-              <div className="panel table-panel"><div className="panel-heading"><div><h3>Dernières activités</h3><p>Les opérations récentes apparaîtront ici.</p></div><button className="text-button" onClick={() => setSection("tickets")}>Voir les tickets <ArrowRight size={15} /></button></div><div className="empty-table"><Ticket size={22} /><span>Aucune activité pour le moment</span></div></div>
-              <div className="demo-note"><ShieldCheck size={17} /><span><b>Mode préparation :</b> les chiffres réels seront affichés après la connexion de Supabase et du routeur MikroTik. Aucune donnée fictive n’est utilisée.</span></div>
+            <div className="admin-header"><button className="icon-button mobile-only" onClick={()=>setMenuOpen(true)}><Menu/></button><div><div className="breadcrumb">Skynet Wi-Fi <span>/</span> {pageTitle}</div><h1>{pageTitle}</h1></div><div className="admin-header-actions"><span className="date-label"><CalendarClock size={16}/>{new Date().toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</span><button className="icon-button" title="Actualiser" onClick={loadAdmin}><RefreshCw size={17}/></button><button className="admin-avatar">{(profile?.full_name||"A").slice(0,1).toUpperCase()}</button></div></div>
+            {busy&&<div className="loading-line">Mise à jour des données…</div>}
+            {section==="overview"&&<div className="dashboard-content">
+              <div className="welcome-row"><div><h2>Bonjour, {profile?.full_name||"Administrateur"} 👋</h2><p>Statistiques réelles enregistrées dans Skynet Wi-Fi.</p></div></div>
+              <div className="stats-grid">
+                <Stat icon={<Users/>} label="Clients inscrits" value={summary?.customers??"—"} note="Comptes clients" tone="blue"/>
+                <Stat icon={<Ticket/>} label="Tickets créés" value={summary?.totalTickets??"—"} note={`${summary?.activeTickets??0} actifs dans le registre`} tone="purple"/>
+                <Stat icon={<CreditCard/>} label="Paiements en attente" value={summary?.pendingPayments??"—"} note="À vérifier manuellement" tone="orange"/>
+                <Stat icon={<Wallet/>} label="Forfaits actifs" value={summary?.activePlans??"—"} note="Catalogue de vente" tone="green"/>
+              </div>
+              <div className="stats-grid revenue-grid"><Stat icon={<Wallet/>} label="Revenus confirmés (HTG)" value={money(summary?.revenue?.HTG??0,"HTG")} note="Somme des paiements confirmés" tone="green"/><Stat icon={<CreditCard/>} label="Revenus confirmés (USD)" value={money(summary?.revenue?.USD??0,"USD")} note="Somme des paiements confirmés" tone="blue"/></div>
+              <div className="dashboard-grid"><div className="panel activity-panel"><div className="panel-heading"><div><h3>État du réseau</h3><p>État actuel de l’intégration MikroTik</p></div><span className="offline-label"><span/>{routerStatus}</span></div><div className="empty-chart"><div className="chart-icon"><Radio size={28}/></div><b>{routerStatus==="Connecté"?"Routeur joignable":"Routeur non connecté"}</b><p>{routerStatus==="Connecté"?"Le routeur répond à la vérification de statut.":"Les sessions et appareils connectés seront suivis lorsque le routeur sera installé et relié au serveur de façon sécurisée."}</p></div></div><div className="panel quick-panel"><div className="panel-heading"><div><h3>Actions rapides</h3><p>Opérations de gestion</p></div></div><button onClick={()=>setSection("tickets")}><span className="quick-icon violet"><Plus/></span><span><b>Créer un ticket</b><small>Émettre un code manuel</small></span><ArrowRight size={16}/></button><button onClick={()=>setSection("payments")}><span className="quick-icon green"><CreditCard/></span><span><b>Vérifier les paiements</b><small>Confirmer ou refuser</small></span><ArrowRight size={16}/></button><button onClick={()=>setSection("plans")}><span className="quick-icon blue"><Wallet/></span><span><b>Gérer les tarifs</b><small>Modifier les forfaits</small></span><ArrowRight size={16}/></button></div></div>
             </div>}
-            {section === "customers" && <div className="dashboard-content"><div className="toolbar"><div className="search-box"><Search size={17} /><input placeholder="Rechercher un client..." value={search} onChange={(e) => setSearch(e.target.value)} /></div><button className="button button-primary" onClick={() => submitDemo("La création de client sera disponible après connexion de la base de données.")}><Plus size={16} /> Ajouter un client</button></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Liste des clients</h3><p>Les comptes clients seront chargés depuis Supabase.</p></div><span className="count-chip">0 client</span></div><div className="empty-table"><Users size={22} /><span>Aucun client enregistré pour le moment</span></div></div></div>}
-            {section === "tickets" && <div className="dashboard-content"><div className="section-intro"><div><h2>Gestion des tickets</h2><p>Créez et gérez les codes d’accès à votre réseau Wi-Fi.</p></div><button className="button button-primary" onClick={() => submitDemo("La génération de tickets sera activée après l’intégration MikroTik.")}><Plus size={16} /> Générer un ticket</button></div><div className="stats-grid compact-stats"><Stat icon={<Ticket />} label="Tickets créés" value="0" note="Aucun ticket" tone="purple" /><Stat icon={<CheckCircle2 />} label="Actifs" value="0" note="Aucun accès actif" tone="green" /><Stat icon={<Clock3 />} label="Expirés" value="0" note="Aucune expiration" tone="orange" /></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Tickets récents</h3><p>Codes et durée de validité</p></div></div><div className="empty-table"><Ticket size={22} /><span>Aucun ticket créé</span></div></div></div>}
-            {section === "payments" && <div className="dashboard-content"><div className="section-intro"><div><h2>Suivi des paiements</h2><p>Confirmez les paiements avant d’activer les tickets.</p></div><span className="pending-chip">0 en attente</span></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Transactions</h3><p>Les paiements seront synchronisés avec le backend.</p></div></div><div className="empty-table"><CreditCard size={22} /><span>Aucun paiement à afficher</span></div></div><div className="demo-note"><LockKeyhole size={17} /><span>Un ticket ne sera jamais activé sur la seule base d’une redirection du navigateur. La confirmation devra être vérifiée côté serveur.</span></div></div>}
-            {section === "plans" && <div className="dashboard-content"><div className="section-intro"><div><h2>Forfaits Wi-Fi</h2><p>Les tarifs et limites seront configurables depuis cet espace.</p></div><button className="button button-primary" onClick={() => submitDemo("L’édition des forfaits sera activée avec Supabase.")}><Plus size={16} /> Nouveau forfait</button></div><div className="admin-plans">{plans.map((plan) => <div className="admin-plan-card" key={plan.id}><div className="plan-icon"><Clock3 /></div><div><b>{plan.name}</b><small>{plan.duration}</small></div><span className="plan-price">{plan.price === "—" ? "Tarif à définir" : plan.price}</span><button className="icon-button" onClick={() => submitDemo("L’édition sera disponible après connexion de la base de données.")}><Settings size={17} /></button></div>)}</div></div>}
-            {section === "settings" && <div className="dashboard-content"><div className="section-intro"><div><h2>Paramètres du système</h2><p>Configuration des services et du réseau.</p></div></div><div className="settings-grid"><div className="panel setting-card"><div className="setting-icon"><Radio /></div><h3>Routeur MikroTik</h3><p>Connexion sécurisée au routeur HotSpot.</p><span className="offline-label"><span /> Non configuré</span><button className="button button-outline" onClick={() => submitDemo("La configuration MikroTik sera faite depuis le backend sécurisé.")}>Configurer plus tard</button></div><div className="panel setting-card"><div className="setting-icon"><Globe2 /></div><h3>Portail client</h3><p>Adresse et paramètres du portail captif.</p><span className="pending-chip">En préparation</span></div><div className="panel setting-card"><div className="setting-icon"><ShieldCheck /></div><h3>Sécurité</h3><p>Accès administrateur et journal des actions.</p><span className="pending-chip">À configurer</span></div></div></div>}
+            {section==="customers"&&<div className="dashboard-content"><div className="toolbar"><div className="search-box"><Search size={17}/><input placeholder="Rechercher un client…" value={search} onChange={(e)=>setSearch(e.target.value)}/></div><span className="count-chip">{customers.length} clients affichés</span></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Liste des clients</h3><p>Comptes inscrits dans Supabase.</p></div></div><div className="data-table-wrap"><table className="data-table"><thead><tr><th>Client</th><th>Téléphone</th><th>Inscription</th></tr></thead><tbody>{customers.filter(c=>`${c.full_name||""} ${c.email||""} ${c.phone||""}`.toLowerCase().includes(search.toLowerCase())).map(c=><tr key={c.id}><td><b>{c.full_name||"Sans nom"}</b><small>{c.email||c.id}</small></td><td>{c.phone||"—"}</td><td>{date(c.created_at)}</td></tr>)}</tbody></table>{customers.length===0&&<div className="empty-table"><Users/><span>Aucun client inscrit pour le moment.</span></div>}</div></div></div>}
+            {section==="tickets"&&<div className="dashboard-content"><div className="section-intro"><div><h2>Gestion des tickets</h2><p>Créez, consultez, bloquez ou révoquez les tickets.</p></div></div><form className="panel create-ticket-form" onSubmit={createTicket}><div><label>Forfait</label><select value={ticketPlanId} onChange={e=>setTicketPlanId(e.target.value)} required><option value="">Choisir un forfait actif</option>{adminPlans.filter(p=>p.is_active).map(p=><option key={p.id} value={p.id}>{p.name} · {money(p.price,p.currency)}</option>)}</select></div><div><label>Associer à un client (facultatif)</label><select value={ticketCustomerId} onChange={e=>setTicketCustomerId(e.target.value)}><option value="">Ticket sans compte client</option>{customers.map(c=><option key={c.id} value={c.id}>{c.full_name||c.email||c.id}</option>)}</select></div><button className="button button-primary" disabled={busy||!ticketPlanId}><Plus size={16}/> Créer le ticket</button></form><div className="panel table-panel"><div className="panel-heading"><div><h3>Tickets enregistrés</h3><p>Le code est le nom d’utilisateur prévu pour le routeur.</p></div><span className="count-chip">{tickets.length} tickets</span></div><div className="data-table-wrap"><table className="data-table"><thead><tr><th>Code</th><th>Forfait</th><th>Statut</th><th>Créé le</th><th>Actions</th></tr></thead><tbody>{tickets.map(t=><tr key={t.id}><td><b>{t.router_username||"—"}</b><small>{t.payment_id?"Paiement lié":"Création manuelle"}</small></td><td>{t.wifi_plans?.name||"Forfait"}</td><td><Status value={t.status}/></td><td>{date(t.created_at)}</td><td><div className="table-actions">{t.status!=="revoked"&&<button title="Bloquer" onClick={()=>changeTicketStatus(t,t.status==="blocked"?"created":"blocked")}><Ban size={15}/></button>}<button title="Révoquer" disabled={t.status==="revoked"} onClick={()=>changeTicketStatus(t,"revoked")}><X size={15}/></button></div></td></tr>)}</tbody></table>{tickets.length===0&&<div className="empty-table"><Ticket/><span>Aucun ticket enregistré.</span></div>}</div></div></div>}
+            {section==="payments"&&<div className="dashboard-content"><div className="section-intro"><div><h2>Suivi des paiements</h2><p>Vérifiez la réception effective avant toute confirmation.</p></div><span className="pending-chip">{payments.filter(p=>p.status==="pending").length} en attente</span></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Transactions</h3><p>Demandes réelles enregistrées par les clients.</p></div></div><div className="data-table-wrap"><table className="data-table"><thead><tr><th>Référence / Client</th><th>Forfait</th><th>Montant</th><th>Moyen</th><th>Statut</th><th>Date</th><th>Actions</th></tr></thead><tbody>{payments.map(p=><tr key={p.id}><td><b>{p.customer_phone||"Client"}</b><small>{p.payment_reference||p.id}</small></td><td>{p.wifi_plans?.name||"—"}</td><td>{money(Number(p.amount),p.currency)}</td><td>{paymentLabel(p.payment_method)}</td><td><Status value={p.status}/></td><td>{date(p.created_at)}</td><td>{p.status==="pending"?<div className="table-actions"><button className="confirm-action" title="Confirmer et créer le ticket" disabled={busy} onClick={()=>confirmPayment(p.id)}><Check size={15}/></button><button title="Refuser" disabled={busy} onClick={()=>rejectPayment(p.id)}><X size={15}/></button></div>:"—"}</td></tr>)}</tbody></table>{payments.length===0&&<div className="empty-table"><CreditCard/><span>Aucune demande de paiement enregistrée.</span></div>}</div></div></div>}
+            {section==="plans"&&<div className="dashboard-content"><div className="section-intro"><div><h2>Forfaits Wi-Fi</h2><p>Modifiez les prix et activez ou désactivez les offres.</p></div></div><div className="admin-plans live-admin-plans">{adminPlans.map(plan=><PlanEditor key={plan.id} plan={plan} busy={busy} onSave={savePlan} onRefresh={loadAdmin}/>)}</div></div>}
+            {section==="settings"&&<div className="dashboard-content"><div className="section-intro"><div><h2>Paramètres du système</h2><p>État des services réellement configurés.</p></div></div><div className="settings-grid"><div className="panel setting-card"><div className="setting-icon"><Radio/></div><h3>Routeur MikroTik</h3><p>Le routeur n’a pas encore été acheté ni connecté.</p><span className="offline-label"><span/> {routerStatus}</span></div><div className="panel setting-card"><div className="setting-icon"><Globe2/></div><h3>API Skynet Wi-Fi</h3><p>Service backend hébergé sur Render.</p><span className={apiHealth==="online"?"online-label":"offline-label"}>{apiHealth==="online"?"Disponible":apiHealth==="offline"?"Indisponible":"Vérification"}</span></div><div className="panel setting-card"><div className="setting-icon"><ShieldCheck/></div><h3>Compte administrateur</h3><p>{profile?.email}</p><span className="online-label">Rôle administrateur vérifié côté serveur</span></div></div></div>}
           </main>
         </div>
       )}
 
-      {showBuy && <Modal title="Choisir votre forfait" onClose={() => setShowBuy(false)}><p className="modal-lead">Sélectionnez la durée de connexion souhaitée.</p><div className="modal-plan-list">{plans.map((plan) => <button key={plan.id} className={`modal-plan ${selectedPlan === plan.id ? "chosen" : ""}`} onClick={() => setSelectedPlan(plan.id)}><span><b>{plan.name}</b><small>{plan.detail}</small></span><span>{selectedPlan === plan.id ? <CheckCircle2 size={19} /> : <span className="radio-empty" />}</span></button>)}</div><label className="field-label">Votre numéro de téléphone</label><input className="field-input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Ex. 4077 0000" inputMode="tel" /><p className="field-help">Le tarif et les moyens de paiement seront affichés après configuration par l’administrateur.</p><button className="button button-primary full-button" onClick={() => { setShowBuy(false); submitDemo("Le catalogue est prêt. Les paiements seront activés après configuration."); }}>Continuer <ArrowRight size={16} /></button></Modal>}
-      {showLogin && <Modal title="Accéder à Internet" onClose={() => setShowLogin(false)}><p className="modal-lead">Entrez le code de votre ticket Skynet Wi-Fi.</p><label className="field-label">Code du ticket</label><input className="field-input ticket-input" value={ticketCode} onChange={(e) => setTicketCode(e.target.value.toUpperCase())} placeholder="EX. SKY-XXXXXX" /><button className="button button-primary full-button" onClick={() => { setShowLogin(false); submitDemo(ticketCode.trim() ? "Le système de validation sera activé avec le routeur MikroTik." : "Veuillez entrer le code de votre ticket."); }}>Se connecter <ArrowRight size={16} /></button><p className="field-help">Vous n’avez pas encore de ticket ? <button className="inline-link" onClick={() => { setShowLogin(false); setShowBuy(true); }}>Acheter un forfait</button></p></Modal>}
-      {notice && <div className="toast"><CheckCircle2 size={18} /> {notice}<button onClick={() => setNotice("")}><X size={15} /></button></div>}
+      {authOpen&&<AuthModal authMode={authMode} setAuthMode={setAuthMode} authEmail={authEmail} setAuthEmail={setAuthEmail} authPassword={authPassword} setAuthPassword={setAuthPassword} fullName={fullName} setFullName={setFullName} phone={phone} setPhone={setPhone} authBusy={authBusy} error={error} onSubmit={handleAuth} onClose={()=>setAuthOpen(false)}/>}
+      {paymentOpen&&chosenPlan&&<Modal title="Demande de paiement" onClose={()=>setPaymentOpen(false)}><form onSubmit={submitPayment}><p className="modal-lead">{chosenPlan.name} · {formatDuration(chosenPlan.duration_seconds)} · <b>{money(chosenPlan.price,chosenPlan.currency)}</b></p><label className="field-label">Votre numéro de téléphone</label><input className="field-input" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Ex. 4077 0000" inputMode="tel" required/><label className="field-label">Moyen de paiement</label><select className="field-input" value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)}><option value="moncash">MonCash</option><option value="natcash">NatCash</option><option value="cash">Espèces</option><option value="bank_transfer">Virement bancaire</option><option value="other">Autre</option></select><label className="field-label">Référence du paiement (facultatif)</label><input className="field-input" value={paymentReference} onChange={e=>setPaymentReference(e.target.value)} placeholder="Référence de transaction"/><p className="field-help">La demande restera en attente jusqu’à ce que l’administrateur vérifie et confirme la réception des fonds.</p><button className="button button-primary full-button" disabled={busy}>{busy?"Enregistrement…":"Envoyer la demande"} <ArrowRight size={16}/></button></form></Modal>}
+      {issuedCode&&<Modal title="Ticket créé" onClose={()=>setIssuedCode("")}><p className="modal-lead">Copiez et conservez ce code. Il ne sera pas réaffiché après fermeture.</p><div className="issued-code">{issuedCode}</div><button className="button button-primary full-button" onClick={()=>navigator.clipboard?.writeText(issuedCode).then(()=>notify("Code copié."))}>Copier le code</button></Modal>}
+      {notice&&<Toast message={notice} onClose={()=>setNotice("")}/>}
+      {error&&<div className="toast error-toast"><X size={17}/>{error}<button onClick={()=>setError("")}><X size={15}/></button></div>}
     </div>
   );
 }
 
-function Stat({ icon, label, value, note, tone }: { icon: React.ReactNode; label: string; value: string; note: string; tone: string }) {
+function Stat({icon,label,value,note,tone}:{icon:React.ReactNode;label:string;value:string|number;note:string;tone:string}) {
   return <div className="stat-card"><div className={`stat-icon ${tone}`}>{icon}</div><span>{label}</span><strong>{value}</strong><small>{note}</small></div>;
 }
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}><div className="modal-card"><div className="modal-header"><h2>{title}</h2><button className="icon-button" onClick={onClose}><X size={19} /></button></div>{children}</div></div>;
+function Status({value}:{value:string}) { return <span className={`record-status status-${value}`}>{statusLabel(value)}</span>; }
+function Toast({message,onClose}:{message:string;onClose:()=>void}) { return <div className="toast"><CheckCircle2 size={18}/>{message}<button onClick={onClose}><X size={15}/></button></div>; }
+function Modal({title,onClose,children}:{title:string;onClose:()=>void;children:React.ReactNode}) {
+  return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><div className="modal-card"><div className="modal-header"><h2>{title}</h2><button className="icon-button" onClick={onClose}><X size={19}/></button></div>{children}</div></div>;
 }
-
-export default App;
+function AuthModal(props:{
+  authMode:"login"|"signup";setAuthMode:(v:"login"|"signup")=>void;authEmail:string;setAuthEmail:(v:string)=>void;
+  authPassword:string;setAuthPassword:(v:string)=>void;fullName:string;setFullName:(v:string)=>void;
+  phone:string;setPhone:(v:string)=>void;authBusy:boolean;error:string;
+  onSubmit:(e:React.FormEvent)=>void;onClose:()=>void;
+}) {
+  return <Modal title={props.authMode==="login"?"Connexion":"Créer un compte"} onClose={props.onClose}><form onSubmit={props.onSubmit}>
+    {props.authMode==="signup"&&<><label className="field-label">Nom complet</label><input className="field-input" value={props.fullName} onChange={e=>props.setFullName(e.target.value)} required/><label className="field-label">Téléphone</label><input className="field-input" value={props.phone} onChange={e=>props.setPhone(e.target.value)} inputMode="tel" required/></>}
+    <label className="field-label">Adresse e-mail</label><input className="field-input" type="email" value={props.authEmail} onChange={e=>props.setAuthEmail(e.target.value)} required/>
+    <label className="field-label">Mot de passe</label><input className="field-input" type="password" minLength={8} value={props.authPassword} onChange={e=>props.setAuthPassword(e.target.value)} required/>
+    {props.error&&<p className="field-error">{props.error}</p>}
+    <button className="button button-primary full-button" disabled={props.authBusy}>{props.authBusy?"Veuillez patienter…":props.authMode==="login"?"Se connecter":"Créer mon compte"}</button>
+    <p className="field-help">{props.authMode==="login"?"Vous n’avez pas de compte ?":"Vous avez déjà un compte ?"} <button type="button" className="inline-link" onClick={()=>props.setAuthMode(props.authMode==="login"?"signup":"login")}>{props.authMode==="login"?"Créer un compte":"Se connecter"}</button></p>
+  </form></Modal>;
+}
+function PlanEditor({plan,busy,onSave}:{plan:Plan;busy:boolean;onSave:(p:Plan,v:string)=>void;onRefresh:()=>void}) {
+  const [price,setPrice]=useState(plan.price==null?"":String(plan.price));
+  useEffect(()=>setPrice(plan.price==null?"":String(plan.price)),[plan.price]);
+  return <div className="admin-plan-card plan-editor"><div className="plan-icon"><Clock3/></div><div className="plan-editor-info"><b>{plan.name}</b><small>{formatDuration(plan.duration_seconds)} · {plan.code}</small></div><div className="plan-price-edit"><input type="number" min="0.01" step="0.01" value={price} onChange={e=>setPrice(e.target.value)} placeholder="Prix HTG"/><span>{plan.currency}</span></div><button className="button button-primary" disabled={busy} onClick={()=>onSave(plan,price)}>Enregistrer</button><span className={plan.is_active?"online-label":"offline-label"}>{plan.is_active?"Actif":"Inactif"}</span></div>;
+}
