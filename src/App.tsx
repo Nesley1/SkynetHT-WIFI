@@ -462,6 +462,13 @@ export default function App() {
       <header className="topbar">
         <Brand />
         <div className="topbar-right">
+          {mode === "customer" && <nav className="customer-desktop-nav" aria-label="Navigation principale">
+            <button className={customerView === "home" ? "active" : ""} onClick={() => goCustomerView("home")}>Accueil</button>
+            <button onClick={() => { if (customerView !== "home") goCustomerView("home"); document.getElementById("forfaits")?.scrollIntoView({ behavior: "smooth" }); }}>Forfaits</button>
+            <button className={customerView === "account" ? "active" : ""} onClick={() => session ? goCustomerView("account") : openAuth("customer")}>Mon compte</button>
+            {session && <button className={customerView === "tickets" ? "active" : ""} onClick={() => goCustomerView("tickets")}>Mes tickets</button>}
+            {session && <button className={customerView === "requests" ? "active" : ""} onClick={() => goCustomerView("requests")}>Mes demandes</button>}
+          </nav>}
           {mode === "customer" && canOpenAdminDashboard && <button className="mode-switch" onClick={openAdminDashboard}><LayoutDashboard size={16} /> Dashboard</button>}
           {mode === "customer" && <button className="customer-profile-button" aria-label="Mon compte" title="Mon compte" onClick={() => session ? goCustomerView("account") : openAuth("customer")}><UserRound size={19}/></button>}
           {mode === "customer" && session && <button className="customer-menu-button" aria-label="Ouvrir le menu" aria-expanded={customerMenuOpen} onClick={() => setCustomerMenuOpen(v => !v)}><Menu size={22}/></button>}
