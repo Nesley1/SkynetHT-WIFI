@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 const API_URL = (import.meta.env.VITE_API_URL || "https://skynetht-wifi-api.onrender.com").replace(/\/$/, "");
+const AUTH_REDIRECT_URL = "https://skynetht-wifi.vercel.app";
 type Section = "overview" | "customers" | "tickets" | "payments" | "plans" | "settings";
 type Plan = {
   id: string; code: string; name: string; duration_seconds: number;
@@ -229,7 +230,7 @@ export default function App() {
       if (authMode === "signup") {
         const { data, error: signError } = await supabase.auth.signUp({
           email: authEmail.trim(), password: authPassword,
-          options: { data: { full_name: fullName.trim(), phone: phone.trim() }, emailRedirectTo: window.location.origin },
+          options: { data: { full_name: fullName.trim(), phone: phone.trim() }, emailRedirectTo: AUTH_REDIRECT_URL },
         });
         if (signError) throw signError;
         if (!data.session) {
