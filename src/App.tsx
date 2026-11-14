@@ -6,7 +6,7 @@ import {
   ArrowRight, CalendarClock, Check, CheckCircle2, Clock3,
   CreditCard, Gauge, Globe2, LayoutDashboard, LockKeyhole,
   LogOut, Menu, Plus, Radio, RefreshCw, Search, Settings, ShieldCheck,
-  Signal, Ticket, Users, Wallet, Wifi, X, Zap, Ban,
+  Signal, Ticket, Users, UserRound, ClipboardList, FileText, KeyRound, Wallet, Wifi, X, Zap, Ban,
 } from "lucide-react";
 
 const API_URL = (import.meta.env.VITE_API_URL || "https://skynetht-wifi-api.onrender.com").replace(/\/$/, "");
@@ -126,6 +126,11 @@ export default function App() {
   const [apiHealth, setApiHealth] = useState<"checking" | "online" | "offline">("checking");
   const [routerStatus, setRouterStatus] = useState("Non configuré");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [customerView, setCustomerView] = useState<"home" | "account" | "tickets" | "requests">("home");
+  const [customerMenuOpen, setCustomerMenuOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [customerDiscount, setCustomerDiscount] = useState({ percent: 0, source: "none" });
   const [customerNotices, setCustomerNotices] = useState<{id:string;reason:string;created_at:string}[]>([]);
   const [profileNameDraft, setProfileNameDraft] = useState("");
@@ -269,6 +274,39 @@ export default function App() {
     setMode("admin");
   };
 
+  const goCustomerView = (view: "home" | "account" | "tickets" | "requests") => {
+    setCustomerView(view);
+    setCustomerMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const saveCustomerProfile = async (event: React.FormEvent) => {
+    event.preventDefault(); setBusy(true); fail("");
+    try {
+      const result = await api<{ profile: Profile }>("/api/me", { method: "PATCH", body: JSON.stringify({ fullName: profileNameDraft, phone: profilePhoneDraft }) });
+      setProfile({ ...result.profile, email: profile?.email });
+      notify("Vos informations ont été mises à jour.");
+    } catch (e) { fail((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const changeCustomerPassword = async (event: React.FormEvent) => {
+    event.preventDefault(); fail("");
+    if (!profile?.email) { fail("Impossible de vérifier votre compte. Reconnectez-vous."); return; }
+    if (newPassword.length < 8) { fail("Le nouveau mot de passe doit contenir au moins 8 caractères."); return; }
+    if (newPassword !== confirmNewPassword) { fail("Les deux nouveaux mots de passe ne correspondent pas."); return; }
+    setBusy(true);
+    try {
+      const { error: verifyError } = await supabase.auth.signInWithPassword({ email: profile.email, password: currentPassword });
+      if (verifyError) throw new Error("Votre mot de passe actuel est incorrect.");
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+      if (updateError) throw updateError;
+      setCurrentPassword(""); setNewPassword(""); setConfirmNewPassword("");
+      notify("Votre mot de passe a été changé avec succès.");
+    } catch (e) { fail((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
   const openAuth = (intent: "customer" | "admin") => {
     setAuthIntent(intent); setAuthMode("login"); setAuthOpen(true); setError(""); setNotice("");
   };
@@ -408,28 +446,31 @@ export default function App() {
         <Brand />
         <div className="topbar-right">
           {mode === "customer" && canOpenAdminDashboard && <button className="mode-switch" onClick={openAdminDashboard}><LayoutDashboard size={16} /> Dashboard</button>}
+          {mode === "customer" && <button className="customer-profile-button" aria-label="Mon compte" title="Mon compte" onClick={() => session ? goCustomerView("account") : openAuth("customer")}><UserRound size={19}/></button>}
+          {mode === "customer" && session && <button className="customer-menu-button" aria-label="Ouvrir le menu" aria-expanded={customerMenuOpen} onClick={() => setCustomerMenuOpen(v => !v)}><Menu size={22}/></button>}
           {mode === "admin" && <button className="mode-switch" onClick={() => { window.history.pushState({}, "", "/"); setMode("customer"); }}><Globe2 size={16} /> Portail client</button>}
           {session && <button className="mode-switch" onClick={handleSignOut}><LogOut size={15}/> Déconnexion</button>}
         </div>
       </header>
+      {mode === "customer" && customerMenuOpen && session && <div className="customer-menu-backdrop" onClick={() => setCustomerMenuOpen(false)}><nav className="customer-menu-panel" aria-label="Menu client" onClick={e => e.stopPropagation()}><button onClick={() => goCustomerView("account")}><UserRound size={18}/> Mon compte</button><button onClick={() => goCustomerView("tickets")}><ClipboardList size={18}/> Mes tickets</button><button onClick={() => goCustomerView("requests")}><FileText size={18}/> Mes demandes</button></nav></div>}
 
       {mode === "customer" ? (
         <main className="customer-page">
-          <section className="hero">
+          <section className={`hero ${customerView !== "home" ? "hidden-customer-view" : ""}`}>
             <div className="hero-copy">
               <div className="eyebrow"><span className="eyebrow-line" /> INTERNET HAUT DÉBIT À GONAÏVES</div>
               <h1>Le Wi-Fi qui vous<br/><em>connecte au monde.</em></h1>
               <p>Une connexion simple, rapide et accessible. Choisissez votre forfait et profitez d’Internet avec Skynet Wi-Fi.</p>
               <div className="hero-actions">
                 <button className="button button-primary" onClick={()=>document.getElementById("forfaits")?.scrollIntoView({behavior:"smooth"})}>Voir les forfaits <ArrowRight size={17}/></button>
-                {!session ? <button className="button button-ghost" onClick={()=>openAuth("customer")}>Créer un compte / Connexion</button> : <button className="button button-ghost" onClick={()=>document.getElementById("profil-client")?.scrollIntoView({behavior:"smooth"})}>Mon profil : {profile?.full_name || session.user.email}</button>}
+                {!session && <button className="button button-ghost" onClick={()=>openAuth("customer")}>Créer un compte / Connexion</button>}
               </div>
               <div className="hero-trust"><span><ShieldCheck size={16}/> Paiements vérifiés</span><span><Zap size={16}/> Ticket après confirmation</span></div>
             </div>
             <div className="hero-art" aria-label="Illustration du réseau Wi-Fi"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="signal-core"><Wifi size={66} strokeWidth={1.45}/></div><div className="float-card float-speed"><Gauge size={17}/><div><b>Forfaits flexibles</b><small>Selon votre besoin</small></div></div><div className="float-card float-status"><span className="live-dot" style={{background:"#d58b47"}}/><div><b>Routeur à installer</b><small>Activation après installation</small></div></div><div className="hero-spark spark-a">✦</div><div className="hero-spark spark-b">✧</div></div>
           </section>
 
-          {session && <section className="my-records" id="profil-client">
+          {false && session && <section className="my-records" id="profil-client">
             <div className="section-heading"><div><div className="eyebrow">ESPACE CLIENT</div><h2>Mon profil et mes informations</h2><p>Consultez vos coordonnées et les communications de Skynet Wi-Fi.</p></div></div>
             {customerNotices.map(n=><div className="panel table-panel" key={n.id}><b>Information importante</b><p>{n.reason}</p><small>{date(n.created_at)}</small></div>)}
             {customerDiscount.percent>0 && <div className="panel table-panel"><b>Votre rabais : {customerDiscount.percent}%</b><p>Cette réduction sera automatiquement appliquée lors de votre paiement.</p></div>}
@@ -440,7 +481,16 @@ export default function App() {
               <button className="button button-primary" disabled={busy}>Enregistrer mon profil</button>
             </form>
           </section>}
-          <section className="plans-section" id="forfaits">
+          {session && customerView === "account" && <section className="customer-account-section">
+            <div className="customer-view-heading"><div className="eyebrow">ESPACE CLIENT</div><h2>Mon compte</h2><p>Gérez vos coordonnées et la sécurité de votre compte.</p></div>
+            {customerNotices.map(n=><div className="panel customer-info-panel" key={n.id}><b>Information importante</b><p>{n.reason}</p><small>{date(n.created_at)}</small></div>)}
+            {customerDiscount.percent>0 && <div className="panel customer-info-panel"><b>Votre rabais : {customerDiscount.percent}%</b><p>Cette réduction sera automatiquement appliquée lors de votre paiement.</p></div>}
+            <form className="panel customer-settings-form" onSubmit={saveCustomerProfile}><h3>Mes informations</h3><div><label>Nom complet</label><input value={profileNameDraft} onChange={e=>setProfileNameDraft(e.target.value)} required minLength={2}/></div><div><label>Adresse e-mail</label><input value={profile?.email||""} readOnly/></div><div><label>Numéro de téléphone</label><input type="tel" inputMode="tel" value={profilePhoneDraft} onChange={e=>setProfilePhoneDraft(e.target.value)} required minLength={7}/></div><button className="button button-primary" disabled={busy}>Enregistrer mes informations</button></form>
+            <form className="panel customer-settings-form" onSubmit={changeCustomerPassword}><h3><KeyRound size={18}/> Changer mon mot de passe</h3><div><label>Mot de passe actuel</label><input type="password" autoComplete="current-password" value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)} required/></div><div><label>Nouveau mot de passe</label><input type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={e=>setNewPassword(e.target.value)} required/><small>8 caractères minimum.</small></div><div><label>Confirmer le nouveau mot de passe</label><input type="password" autoComplete="new-password" minLength={8} value={confirmNewPassword} onChange={e=>setConfirmNewPassword(e.target.value)} required/></div><button className="button button-primary" disabled={busy}>Mettre à jour le mot de passe</button></form>
+          </section>}
+          {session && customerView === "tickets" && <section className="customer-records-page"><div className="customer-view-heading"><div className="eyebrow">ESPACE CLIENT</div><h2>Mes tickets</h2><p>Retrouvez les tickets Wi-Fi créés après confirmation de vos paiements.</p><button className="button button-outline" onClick={loadMyRecords}><RefreshCw size={14}/> Actualiser</button></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Mes tickets Wi-Fi</h3><p>Vos codes de connexion.</p></div></div>{myTickets.length===0?<div className="empty-table"><Ticket/><span>Aucun ticket délivré pour le moment.</span></div>:<div className="my-record-list">{myTickets.map(t=><div className="my-record-row ticket-record" key={t.id}><div><b>{t.router_username||"Code en préparation"}</b><small>{t.wifi_plans?.name||"Forfait Wi-Fi"} · {date(t.issued_at)}</small></div><Status value={t.status}/></div>)}</div>}<p className="field-help">Les tickets seront utilisables dès que le routeur MikroTik sera installé et connecté.</p></div></section>}
+          {session && customerView === "requests" && <section className="customer-records-page"><div className="customer-view-heading"><div className="eyebrow">ESPACE CLIENT</div><h2>Mes demandes</h2><p>Suivez l’état de vos demandes de paiement.</p><button className="button button-outline" onClick={loadMyRecords}><RefreshCw size={14}/> Actualiser</button></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Historique des demandes</h3><p>Les demandes de paiement associées à votre compte.</p></div></div>{myPayments.length===0?<div className="empty-table"><CreditCard/><span>Aucune demande enregistrée.</span></div>:<div className="my-record-list">{myPayments.map(p=><div className="my-record-row" key={p.id}><div><b>{p.wifi_plans?.name||"Forfait Wi-Fi"}</b><small>{date(p.created_at)} · {paymentLabel(p.payment_method)}</small></div><strong>{money(Number(p.amount),p.currency)}</strong><Status value={p.status}/></div>)}</div>}</div></section>}
+          <section className={`plans-section ${customerView !== "home" ? "hidden-customer-view" : ""}`} id="forfaits">
             <div className="section-heading"><div><div className="eyebrow">NOS OFFRES</div><h2>Choisissez votre connexion</h2><p>Les prix affichés proviennent directement du catalogue Skynet Wi-Fi.</p></div><span className="no-price-note">{catalogLoading?"Chargement des forfaits":catalogError?"Catalogue indisponible":"Forfaits synchronisés"}</span></div>
             {catalogError ? <div className="panel error-panel">{catalogError} <button className="button button-outline" onClick={loadPlans}>Réessayer</button></div> : catalogLoading ? <div className="panel empty-table">Chargement des forfaits…</div> : activePlans.length === 0 ? <div className="panel empty-table">Aucun forfait actif pour le moment.</div> : <div className="plan-grid">
               {activePlans.map((plan)=><button key={plan.id} className={`plan-card ${selectedPlan===plan.id?"selected":""}`} onClick={()=>setSelectedPlan(plan.id)}>
@@ -449,7 +499,7 @@ export default function App() {
               </button>)}
             </div>}
             <div className="purchase-strip"><div className="purchase-icon"><Ticket size={22}/></div><div><b>Prêt à faire votre demande ?</b><span>Un ticket est délivré après vérification du paiement.</span></div><button className="button button-primary" disabled={!chosenPlan||chosenPlan.price==null||Number(chosenPlan.price)<=0} onClick={startPurchase}>Continuer <ArrowRight size={16}/></button></div>
-            {session&&<section className="my-records">
+            {false && session&&<section className="my-records">
               <div className="section-heading"><div><div className="eyebrow">ESPACE CLIENT</div><h2>Mes demandes et mes tickets</h2><p>Suivez les paiements et retrouvez vos tickets Skynet Wi-Fi.</p></div><button className="button button-outline" onClick={loadMyRecords}><RefreshCw size={14}/> Actualiser</button></div>
               <div className="my-record-grid">
                 <div className="panel table-panel"><div className="panel-heading"><div><h3>Mes paiements</h3><p>Demandes de paiement récentes.</p></div></div>
@@ -462,8 +512,8 @@ export default function App() {
               </div>
             </section>}
           </section>
-          <section className="how-section"><div className="section-heading centered"><div className="eyebrow">C’EST SIMPLE</div><h2>Connectez-vous en 3 étapes</h2></div><div className="steps-grid"><div className="step"><span>01</span><div className="step-icon"><Signal/></div><b>Choisissez un forfait</b><p>Sélectionnez une durée et créez votre demande de paiement.</p></div><div className="step"><span>02</span><div className="step-icon"><CreditCard/></div><b>Faites le paiement</b><p>Effectuez le paiement selon le moyen choisi et conservez la référence.</p></div><div className="step"><span>03</span><div className="step-icon"><Ticket/></div><b>Recevez votre ticket</b><p>Après vérification par Skynet, votre code de connexion sera créé.</p></div></div></section>
-          <footer className="footer"><Brand/><span>© {new Date().getFullYear()} Skynet Wi-Fi. Tous droits réservés.</span><span>Support : contactez l’administrateur du réseau.</span></footer>
+          <section className={`how-section ${customerView !== "home" ? "hidden-customer-view" : ""}`}><div className="section-heading centered"><div className="eyebrow">C’EST SIMPLE</div><h2>Connectez-vous en 3 étapes</h2></div><div className="steps-grid"><div className="step"><span>01</span><div className="step-icon"><Signal/></div><b>Choisissez un forfait</b><p>Sélectionnez une durée et créez votre demande de paiement.</p></div><div className="step"><span>02</span><div className="step-icon"><CreditCard/></div><b>Faites le paiement</b><p>Effectuez le paiement selon le moyen choisi et conservez la référence.</p></div><div className="step"><span>03</span><div className="step-icon"><Ticket/></div><b>Recevez votre ticket</b><p>Après vérification par Skynet, votre code de connexion sera créé.</p></div></div></section>
+          <footer className={`footer ${customerView !== "home" ? "hidden-customer-view" : ""}`}><Brand/><span>© {new Date().getFullYear()} Skynet Wi-Fi. Tous droits réservés.</span><span>Support : contactez l’administrateur du réseau.</span></footer>
         </main>
       ) : (
         <div className="admin-layout">
