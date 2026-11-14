@@ -156,7 +156,7 @@ const server = createServer(async (req, res) => {
       if (!valid) { send(res, 403, { error: "INVALID_WEBHOOK_SIGNATURE" }); return; }
       const event = JSON.parse(raw.toString("utf8"));
       const headerEvent = String(req.headers["x-tranzak-event"] || "");
-      if (!["payment.success", "payment.failed", "payment.refunded"].includes(event?.event)
+      if (!["payment.success", "payment.failed"].includes(event?.event)
           || (headerEvent && headerEvent !== event.event)
           || !event?.data?.transaction_id) {
         send(res, 400, { error: "INVALID_WEBHOOK_EVENT" }); return;
@@ -176,17 +176,7 @@ const server = createServer(async (req, res) => {
             provider_payload: { ...payment.provider_payload, final_status: "failed", failure_reason: event.data.failure_reason || null } })
           .eq("id", payment.id).eq("status", "pending");
         if (updateError) throw updateError;
-      } else if (event.event === "payment.refunded" && payment.status === "confirmed" && payment.provider_payload?.payment_method === "card") {
-        const { error: refundError } = await supabase.from("payments")
-          .update({ status: "refunded", updated_at: new Date().toISOString(),
-            provider_payload: { ...payment.provider_payload, final_status: "refunded" } })
-          .eq("id", payment.id).eq("status", "confirmed");
-        if (refundError) throw refundError;
-        const { error: ticketError } = await supabase.from("wifi_tickets")
-          .update({ status: "revoked", updated_at: new Date().toISOString() })
-          .eq("payment_id", payment.id).in("status", ["created", "active"]);
-        if (ticketError) throw ticketError;
-      }
+
       send(res, 200, { received: true });
       return;
     }
@@ -242,7 +232,7 @@ const server = createServer(async (req, res) => {
       const user = await requireUser(req, res, origin);
       if (!user) return;
       const body = await readBody(req);
-      const allowedMethods = ["cash", "moncash", "natcash", "card", "bank_transfer", "other"];
+      const allowedMethods = ["moncash", "natcash"];
       if (!body.planId || !allowedMethods.includes(body.paymentMethod) || typeof body.customerPhone !== "string" || body.customerPhone.trim().length < 7) {
         send(res, 400, { error: "INVALID_PAYMENT_REQUEST" }, origin);
         return;
@@ -255,7 +245,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const useTranzak = ["moncash", "natcash", "card"].includes(body.paymentMethod);
+      const useTranzak = ["moncash", "natcash"].includes(body.paymentMethod);
       if (useTranzak && (!process.env.TRANZAK_API_KEY || !process.env.TRANZAK_WEBHOOK_SECRET)) {
         send(res, 503, { error: "TRANZAK_NOT_CONFIGURED" }, origin);
         return;
@@ -303,10 +293,10 @@ const server = createServer(async (req, res) => {
             signal: AbortSignal.timeout(15000),
           });
           providerBody = await providerResponse.json().catch(() => ({}));
-          if (!providerResponse.ok || !providerBody.transaction_id || (body.paymentMethod === "card" ? (!providerBody.client_secret || !providerBody.publishable_key) : !providerBody.payment_url)) {
+          if (!providerResponse.ok || !providerBody.transaction_id || !providerBody.payment_url) {
             throw new Error(providerBody.message || providerBody.error || `TRANZAK_HTTP_${providerResponse.status}`);
           }
-          const paymentUrl = providerBody.payment_url ? new URL(providerBody.payment_url) : null;
+          const paymentUrl = new URL(providerBody.payment_url);
           if (paymentUrl && paymentUrl.protocol !== "https:") throw new Error("INVALID_TRANZAK_PAYMENT_URL");
           const providerAmount = Number(providerBody.amount);
           if (!Number.isFinite(providerAmount) || !["HTG", "USD"].includes(providerBody.currency)) {
@@ -333,12 +323,7 @@ const server = createServer(async (req, res) => {
           if (saveError) throw saveError;
           send(res, 201, {
             payment, provider: "tranzak",
-            ...(paymentUrl ? { paymentUrl: paymentUrl.toString() } : {}),
-            ...(body.paymentMethod === "card" ? { cardSetup: {
-              transactionId: String(providerBody.transaction_id),
-              clientSecret: String(providerBody.client_secret),
-              publishableKey: String(providerBody.publishable_key),
-            } } : {}),
+            paymentUrl: paymentUrl.toString(),
           }, origin);
           return;
         } catch (providerError) {
