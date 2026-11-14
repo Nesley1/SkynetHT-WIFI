@@ -186,8 +186,14 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    const confirmPaymentMatch = req.method === "POST"
-      ? url.pathname.match(/^\\/api\\/admin\\/payments\\/([0-9a-f-]{36})\\/confirm$/i)
+    const confirmPaymentPath = req.method === "POST"
+      && url.pathname.startsWith("/api/admin/payments/")
+      && url.pathname.endsWith("/confirm");
+    const confirmPaymentId = confirmPaymentPath
+      ? url.pathname.slice("/api/admin/payments/".length, -"/confirm".length)
+      : "";
+    const confirmPaymentMatch = confirmPaymentId && /^[0-9a-f-]{36}$/i.test(confirmPaymentId)
+      ? [null, confirmPaymentId]
       : null;
     if (confirmPaymentMatch) {
       const user = await requireUser(req, res, origin, true);
