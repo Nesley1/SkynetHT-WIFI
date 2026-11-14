@@ -173,6 +173,50 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/admin/tickets") {
+      const user = await requireUser(req, res, origin, true);
+      if (!user) return;
+      const body = await readBody(req);
+      const validUuid = (value) => typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value);
+      if (!validUuid(body.planId) || (body.userId != null && !validUuid(body.userId))) {
+        send(res, 400, { error: "INVALID_TICKET_REQUEST" }, origin);
+        return;
+      }
+      const { data: plan, error: planError } = await supabase
+        .from("wifi_plans")
+        .select("id,name,code,duration_seconds,starts_on_first_login")
+        .eq("id", body.planId)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (planError) throw planError;
+      if (!plan) {
+        send(res, 409, { error: "ACTIVE_PLAN_NOT_FOUND" }, origin);
+        return;
+      }
+
+      const ticketCode = createTicketCode();
+      const codeHash = createHash("sha256").update(ticketCode, "utf8").digest("hex");
+      const { data: result, error } = await supabase.rpc("admin_create_wifi_ticket", {
+        p_plan_id: plan.id,
+        p_admin_id: user.id,
+        p_user_id: body.userId || null,
+        p_code_hash: codeHash,
+        p_router_username: ticketCode,
+      });
+      if (error) {
+        if (error.message?.includes("ADMIN_REQUIRED")) {
+          send(res, 403, { error: "ADMIN_REQUIRED" }, origin);
+          return;
+        }
+        throw error;
+      }
+      send(res, 201, {
+        ticket: { id: result.ticketId, code: ticketCode, status: "created", plan },
+        message: "Ticket created. It will not provide internet until MikroTik is connected.",
+      }, origin);
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/admin/tickets") {
       const user = await requireUser(req, res, origin, true);
       if (!user) return;
@@ -250,6 +294,38 @@ const server = createServer(async (req, res) => {
         },
         message: "Payment confirmed. Ticket created; router activation is not enabled yet.",
       }, origin);
+      return;
+    }
+
+    const rejectPaymentPath = req.method === "POST"
+      && url.pathname.startsWith("/api/admin/payments/")
+      && url.pathname.endsWith("/reject");
+    const rejectPaymentId = rejectPaymentPath
+      ? url.pathname.slice("/api/admin/payments/".length, -"/reject".length)
+      : "";
+    if (rejectPaymentId && /^[0-9a-f-]{36}$/i.test(rejectPaymentId)) {
+      const user = await requireUser(req, res, origin, true);
+      if (!user) return;
+      const { data: result, error } = await supabase.rpc("admin_reject_wifi_payment", {
+        p_payment_id: rejectPaymentId,
+        p_admin_id: user.id,
+      });
+      if (error) {
+        if (error.message?.includes("PAYMENT_NOT_PENDING")) {
+          send(res, 409, { error: "PAYMENT_NOT_PENDING" }, origin);
+          return;
+        }
+        if (error.message?.includes("PAYMENT_NOT_FOUND")) {
+          send(res, 404, { error: "PAYMENT_NOT_FOUND" }, origin);
+          return;
+        }
+        if (error.message?.includes("ADMIN_REQUIRED")) {
+          send(res, 403, { error: "ADMIN_REQUIRED" }, origin);
+          return;
+        }
+        throw error;
+      }
+      send(res, 200, { paymentId: rejectPaymentId, status: "rejected", result: result?.result }, origin);
       return;
     }
 
