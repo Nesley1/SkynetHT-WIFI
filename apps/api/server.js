@@ -197,13 +197,29 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "PATCH" && url.pathname === "/api/me") {
+      const user = await requireUser(req, res, origin); if (!user) return;
+      const body = await readBody(req); const updates = {};
+      if (Object.hasOwn(body, "fullName")) { if (typeof body.fullName !== "string" || body.fullName.trim().length < 2 || body.fullName.trim().length > 100) { send(res, 400, { error: "INVALID_FULL_NAME" }, origin); return; } updates.full_name = body.fullName.trim(); }
+      if (Object.hasOwn(body, "phone")) { if (typeof body.phone !== "string" || body.phone.trim().length < 7 || body.phone.trim().length > 30) { send(res, 400, { error: "INVALID_PHONE" }, origin); return; } updates.phone = body.phone.trim(); }
+      if (!Object.keys(updates).length) { send(res, 400, { error: "NO_PROFILE_CHANGES" }, origin); return; }
+      const { data, error } = await supabase.from("profiles").update(updates).eq("id", user.id).select("id,full_name,phone,role,created_at").single();
+      if (error) throw error; send(res, 200, { profile: { ...data, email: user.email } }, origin); return;
+    }
     if (req.method === "GET" && url.pathname === "/api/me") {
       const user = await requireUser(req, res, origin);
       if (!user) return;
       const { data: profile, error } = await supabase
         .from("profiles").select("id,full_name,phone,role,created_at").eq("id", user.id).maybeSingle();
       if (error) throw error;
-      send(res, 200, { user: { id: user.id, email: user.email }, profile }, origin);
+      const [d, g, n] = await Promise.all([
+        supabase.from("customer_discounts").select("percent,enabled").eq("user_id", user.id).maybeSingle(),
+        supabase.from("system_settings").select("value").eq("key", "global_customer_discount").maybeSingle(),
+        supabase.from("service_notices").select("id,reason,created_at").eq("active", true).or("scope.eq.global,and(scope.eq.individual,user_id.eq." + user.id + ")").order("created_at", { ascending: false }).limit(20),
+      ]);
+      if (d.error) throw d.error; if (g.error) throw g.error; if (n.error) throw n.error;
+      const globalPercent = Number(g.data?.value?.percent || 0);
+      send(res, 200, { user: { id: user.id, email: user.email }, profile, discount: { percent: d.data?.enabled ? Number(d.data.percent) : globalPercent, source: d.data?.enabled ? "individual" : globalPercent > 0 ? "global" : "none" }, notices: n.data || [] }, origin);
       return;
     }
 
@@ -368,6 +384,33 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/admin/customer-benefits") {
+      const user = await requireUser(req, res, origin, true); if (!user) return;
+      const [g,d,n] = await Promise.all([supabase.from("system_settings").select("value").eq("key","global_customer_discount").maybeSingle(),supabase.from("customer_discounts").select("user_id,percent,enabled,updated_at"),supabase.from("service_notices").select("id,scope,user_id,reason,active,created_at").order("created_at",{ascending:false}).limit(100)]);
+      if (g.error) throw g.error; if (d.error) throw d.error; if (n.error) throw n.error;
+      send(res,200,{globalDiscount:Number(g.data?.value?.percent||0),discounts:d.data||[],notices:n.data||[]},origin); return;
+    }
+    if (req.method === "PUT" && url.pathname === "/api/admin/customer-benefits/global-discount") {
+      const user = await requireUser(req,res,origin,true); if (!user) return; const body=await readBody(req); const percent=Number(body.percent||0);
+      if (!Number.isFinite(percent)||percent<0||percent>100) { send(res,400,{error:"INVALID_DISCOUNT"},origin); return; }
+      const {error}=await supabase.from("system_settings").upsert({key:"global_customer_discount",value:{percent},updated_by:user.id,updated_at:new Date().toISOString()},{onConflict:"key"}); if(error) throw error; send(res,200,{percent},origin); return;
+    }
+    if (req.method === "PUT" && url.pathname === "/api/admin/customer-benefits/individual-discount") {
+      const user=await requireUser(req,res,origin,true); if(!user)return; const body=await readBody(req); const percent=Number(body.percent);
+      if(!/^[0-9a-f-]{36}$/i.test(body.userId||"")||!Number.isFinite(percent)||percent<0||percent>100){send(res,400,{error:"INVALID_INDIVIDUAL_DISCOUNT"},origin);return;}
+      const result=percent===0?await supabase.from("customer_discounts").delete().eq("user_id",body.userId):await supabase.from("customer_discounts").upsert({user_id:body.userId,percent,enabled:true,updated_by:user.id,updated_at:new Date().toISOString()},{onConflict:"user_id"});
+      if(result.error)throw result.error; send(res,200,{userId:body.userId,percent},origin); return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/service-notices") {
+      const user=await requireUser(req,res,origin,true); if(!user)return; const body=await readBody(req);
+      if(!["global","individual"].includes(body.scope)||typeof body.reason!=="string"||body.reason.trim().length<3||body.reason.trim().length>1000||(body.scope==="individual"&&!/^[0-9a-f-]{36}$/i.test(body.userId||""))){send(res,400,{error:"INVALID_SERVICE_NOTICE"},origin);return;}
+      const {data,error}=await supabase.from("service_notices").insert({scope:body.scope,user_id:body.scope==="individual"?body.userId:null,reason:body.reason.trim(),created_by:user.id}).select("id,scope,user_id,reason,active,created_at").single(); if(error)throw error; send(res,201,{notice:data},origin); return;
+    }
+    if (req.method === "PATCH" && url.pathname.startsWith("/api/admin/service-notices/")) {
+      const user=await requireUser(req,res,origin,true); if(!user)return; const id=url.pathname.slice("/api/admin/service-notices/".length); const body=await readBody(req);
+      if(!/^[0-9a-f-]{36}$/i.test(id)||typeof body.active!=="boolean"){send(res,400,{error:"INVALID_NOTICE_UPDATE"},origin);return;}
+      const {data,error}=await supabase.from("service_notices").update({active:body.active}).eq("id",id).select("id,active").single(); if(error)throw error; send(res,200,{notice:data},origin); return;
+    }
     if (req.method === "GET" && url.pathname === "/api/admin/customers") {
       const user = await requireUser(req, res, origin, true);
       if (!user) return;
