@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createHash, randomBytes } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { getRouterStatus, isRouterConfigured } from "./router.js";
 
@@ -29,6 +30,11 @@ async function readBody(req) {
     if (raw.length > 16_384) throw new Error("Request body too large");
   }
   return raw ? JSON.parse(raw) : {};
+}
+
+function createTicketCode() {
+  const suffix = randomBytes(6).toString("hex").toUpperCase();
+  return `SKY-${suffix.slice(0, 6)}-${suffix.slice(6)}`;
 }
 
 async function requireUser(req, res, origin, admin = false) {
@@ -164,6 +170,80 @@ const server = createServer(async (req, res) => {
         .limit(100);
       if (error) throw error;
       send(res, 200, { payments: data || [] }, origin);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/tickets") {
+      const user = await requireUser(req, res, origin, true);
+      if (!user) return;
+      const { data, error } = await supabase
+        .from("wifi_tickets")
+        .select("id,user_id,plan_id,payment_id,router_username,status,issued_at,activated_at,expires_at,created_at,wifi_plans(name,code,duration_seconds,starts_on_first_login)")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      send(res, 200, { tickets: data || [] }, origin);
+      return;
+    }
+
+    const confirmPaymentMatch = req.method === "POST"
+      ? url.pathname.match(/^\\/api\\/admin\\/payments\\/([0-9a-f-]{36})\\/confirm$/i)
+      : null;
+    if (confirmPaymentMatch) {
+      const user = await requireUser(req, res, origin, true);
+      if (!user) return;
+
+      const paymentId = confirmPaymentMatch[1];
+      const { data: payment, error: paymentError } = await supabase
+        .from("payments")
+        .select("id,status,plan_id,wifi_plans(name,code,duration_seconds,starts_on_first_login)")
+        .eq("id", paymentId)
+        .maybeSingle();
+      if (paymentError) throw paymentError;
+      if (!payment) {
+        send(res, 404, { error: "PAYMENT_NOT_FOUND" }, origin);
+        return;
+      }
+      if (payment.status !== "pending") {
+        send(res, 409, { error: "PAYMENT_NOT_PENDING" }, origin);
+        return;
+      }
+
+      const ticketCode = createTicketCode();
+      const codeHash = createHash("sha256").update(ticketCode, "utf8").digest("hex");
+      const { data: result, error } = await supabase.rpc("admin_confirm_wifi_payment", {
+        p_payment_id: paymentId,
+        p_admin_id: user.id,
+        p_code_hash: codeHash,
+        p_router_username: ticketCode,
+      });
+      if (error) {
+        if (error.message?.includes("PAYMENT_NOT_PENDING")) {
+          send(res, 409, { error: "PAYMENT_NOT_PENDING" }, origin);
+          return;
+        }
+        if (error.message?.includes("ADMIN_REQUIRED")) {
+          send(res, 403, { error: "ADMIN_REQUIRED" }, origin);
+          return;
+        }
+        throw error;
+      }
+      if (result?.result !== "confirmed") {
+        send(res, 409, { error: "PAYMENT_ALREADY_PROCESSED" }, origin);
+        return;
+      }
+
+      send(res, 200, {
+        paymentId,
+        status: "confirmed",
+        ticket: {
+          id: result.ticketId,
+          code: ticketCode,
+          status: "created",
+          plan: payment.wifi_plans,
+        },
+        message: "Payment confirmed. Ticket created; router activation is not enabled yet.",
+      }, origin);
       return;
     }
 
