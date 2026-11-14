@@ -233,14 +233,16 @@ export default function App() {
     setBusy(true);
     fail("");
     try {
-      const [s, c, p, t, pl] = await Promise.all([
+      const [s, c, p, t, pl, benefits] = await Promise.all([
         api<Summary>("/api/admin/summary"),
         api<{ customers: Profile[] }>("/api/admin/customers"),
         api<{ payments: Payment[] }>("/api/admin/payments"),
         api<{ tickets: WifiTicket[] }>("/api/admin/tickets"),
         api<{ plans: Plan[] }>("/api/admin/plans"),
+        api<{globalDiscount:number;discounts:{user_id:string;percent:number;enabled:boolean}[];notices:{id:string;scope:string;user_id:string|null;reason:string;active:boolean;created_at:string}[]}>("/api/admin/customer-benefits"),
       ]);
       setSummary(s); setCustomers(c.customers); setPayments(p.payments); setTickets(t.tickets); setAdminPlans(pl.plans);
+      setGlobalDiscount(String(benefits.globalDiscount || 0)); setIndividualDiscounts(benefits.discounts); setServiceNotices(benefits.notices);
       setTicketPlanId((current) => current || pl.plans.find((plan) => plan.is_active)?.id || "");
     } catch (e) { fail((e as Error).message); }
     finally { setBusy(false); }
