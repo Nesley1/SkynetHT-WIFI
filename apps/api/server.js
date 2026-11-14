@@ -327,6 +327,40 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    const ticketUpdatePath = req.method === "PATCH"
+      && url.pathname.startsWith("/api/admin/tickets/");
+    const ticketUpdateId = ticketUpdatePath
+      ? url.pathname.slice("/api/admin/tickets/".length)
+      : "";
+    if (ticketUpdateId && /^[0-9a-f-]{36}$/i.test(ticketUpdateId)) {
+      const user = await requireUser(req, res, origin, true);
+      if (!user) return;
+      const body = await readBody(req);
+      if (!["created", "blocked", "revoked"].includes(body.status)) {
+        send(res, 400, { error: "INVALID_TICKET_STATUS" }, origin);
+        return;
+      }
+      const { data: ticket, error } = await supabase.from("wifi_tickets")
+        .update({ status: body.status, updated_at: new Date().toISOString() })
+        .eq("id", ticketUpdateId)
+        .select("id,status,router_username")
+        .maybeSingle();
+      if (error) throw error;
+      if (!ticket) {
+        send(res, 404, { error: "TICKET_NOT_FOUND" }, origin);
+        return;
+      }
+      await supabase.from("admin_audit_logs").insert({
+        actor_id: user.id,
+        action: "wifi_ticket_status_changed",
+        entity_type: "wifi_ticket",
+        entity_id: ticket.id,
+        details: { status: body.status },
+      });
+      send(res, 200, { ticket }, origin);
+      return;
+    }
+
     const confirmPaymentPath = req.method === "POST"
       && url.pathname.startsWith("/api/admin/payments/")
       && url.pathname.endsWith("/confirm");
