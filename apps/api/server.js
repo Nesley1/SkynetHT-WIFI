@@ -170,8 +170,13 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    const planUpdateMatch = req.method === "PATCH"
-      ? url.pathname.match(/^\\/api\\/admin\\/plans\\/([0-9a-f-]{36})$/i)
+    const planUpdatePath = req.method === "PATCH"
+      && url.pathname.startsWith("/api/admin/plans/");
+    const planUpdateId = planUpdatePath
+      ? url.pathname.slice("/api/admin/plans/".length)
+      : "";
+    const planUpdateMatch = planUpdateId && /^[0-9a-f-]{36}$/i.test(planUpdateId)
+      ? [null, planUpdateId]
       : null;
     if (planUpdateMatch) {
       const user = await requireUser(req, res, origin, true);
