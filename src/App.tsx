@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import {
   Activity, ArrowRight, CalendarClock, Check, CheckCircle2,
   Clock3, CreditCard, Gauge, Globe2, LayoutDashboard, LifeBuoy,
@@ -10,7 +11,7 @@ import {
 type Plan = { id: string; name: string; duration: string; price: string; detail: string; popular?: boolean; };
 type Section = "overview" | "customers" | "tickets" | "payments" | "plans" | "settings";
 
-const plans: Plan[] = [
+const defaultPlans: Plan[] = [
   { id: "hour", name: "1 heure", duration: "60 minutes", price: "—", detail: "Pour une connexion rapide" },
   { id: "day", name: "1 jour", duration: "24 heures", price: "—", detail: "Idéal pour une journée" },
   { id: "week", name: "7 jours", duration: "7 jours", price: "—", detail: "Une semaine complète", popular: true },
@@ -32,6 +33,8 @@ function Brand() {
 }
 
 function App() {
+  const [plans, setPlans] = useState<Plan[]>(defaultPlans);
+  const [catalogStatus, setCatalogStatus] = useState<"loading" | "connected" | "fallback">("loading");
   const [mode, setMode] = useState<"customer" | "admin">("customer");
   const [section, setSection] = useState<Section>("overview");
   const [selectedPlan, setSelectedPlan] = useState("week");
@@ -43,6 +46,45 @@ function App() {
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [period, setPeriod] = useState("7 derniers jours");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPlans() {
+      if (!isSupabaseConfigured) {
+        setCatalogStatus("fallback");
+        return;
+      }
+      const { data, error } = await supabase
+        .from("wifi_plans")
+        .select("code, name, duration_seconds, price, currency, is_active, display_order")
+        .eq("is_active", true)
+        .order("display_order", { ascending: true });
+      if (cancelled) return;
+      if (error || !data?.length) {
+        console.error("Impossible de charger les forfaits Supabase:", error?.message);
+        setCatalogStatus("fallback");
+        return;
+      }
+      const formatDuration = (seconds: number) => {
+        if (seconds % 2592000 === 0) return `${seconds / 2592000} jours`;
+        if (seconds % 86400 === 0) return `${seconds / 86400} jour${seconds / 86400 > 1 ? "s" : ""}`;
+        if (seconds % 3600 === 0) return `${seconds / 3600} heure${seconds / 3600 > 1 ? "s" : ""}`;
+        return `${Math.round(seconds / 60)} minutes`;
+      };
+      setPlans(data.map((plan) => ({
+        id: plan.code,
+        name: plan.name,
+        duration: formatDuration(plan.duration_seconds),
+        price: plan.price == null ? "—" : new Intl.NumberFormat("fr-FR", { style: "currency", currency: plan.currency }).format(Number(plan.price)),
+        detail: "Forfait Skynet Wi-Fi",
+        popular: plan.code === "SKY-7D",
+      })));
+      setSelectedPlan((current) => data.some((plan) => plan.code === current) ? current : data[0].code);
+      setCatalogStatus("connected");
+    }
+    loadPlans();
+    return () => { cancelled = true; };
+  }, []);
 
   const title = navItems.find((item) => item.id === section)?.label ?? "Vue d’ensemble";
 
@@ -86,7 +128,7 @@ function App() {
           </section>
 
           <section className="plans-section" id="forfaits">
-            <div className="section-heading"><div><div className="eyebrow">NOS OFFRES</div><h2>Choisissez votre connexion</h2><p>Des forfaits adaptés à votre rythme.</p></div><span className="no-price-note">Tarifs communiqués au point de vente</span></div>
+            <div className="section-heading"><div><div className="eyebrow">NOS OFFRES</div><h2>Choisissez votre connexion</h2><p>Des forfaits adaptés à votre rythme.</p></div><span className="no-price-note">{catalogStatus === "connected" ? "Forfaits synchronisés" : "Tarifs communiqués au point de vente"}</span></div>
             <div className="plan-grid">
               {plans.map((plan) => <button key={plan.id} className={`plan-card ${selectedPlan === plan.id ? "selected" : ""}`} onClick={() => setSelectedPlan(plan.id)}>
                 {plan.popular && <span className="popular-tag">POPULAIRE</span>}
@@ -124,7 +166,7 @@ function App() {
             {section === "customers" && <div className="dashboard-content"><div className="toolbar"><div className="search-box"><Search size={17} /><input placeholder="Rechercher un client..." value={search} onChange={(e) => setSearch(e.target.value)} /></div><button className="button button-primary" onClick={() => submitDemo("La création de client sera disponible après connexion de la base de données.")}><Plus size={16} /> Ajouter un client</button></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Liste des clients</h3><p>Les comptes clients seront chargés depuis Supabase.</p></div><span className="count-chip">0 client</span></div><div className="empty-table"><Users size={22} /><span>Aucun client enregistré pour le moment</span></div></div></div>}
             {section === "tickets" && <div className="dashboard-content"><div className="section-intro"><div><h2>Gestion des tickets</h2><p>Créez et gérez les codes d’accès à votre réseau Wi-Fi.</p></div><button className="button button-primary" onClick={() => submitDemo("La génération de tickets sera activée après l’intégration MikroTik.")}><Plus size={16} /> Générer un ticket</button></div><div className="stats-grid compact-stats"><Stat icon={<Ticket />} label="Tickets créés" value="0" note="Aucun ticket" tone="purple" /><Stat icon={<CheckCircle2 />} label="Actifs" value="0" note="Aucun accès actif" tone="green" /><Stat icon={<Clock3 />} label="Expirés" value="0" note="Aucune expiration" tone="orange" /></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Tickets récents</h3><p>Codes et durée de validité</p></div></div><div className="empty-table"><Ticket size={22} /><span>Aucun ticket créé</span></div></div></div>}
             {section === "payments" && <div className="dashboard-content"><div className="section-intro"><div><h2>Suivi des paiements</h2><p>Confirmez les paiements avant d’activer les tickets.</p></div><span className="pending-chip">0 en attente</span></div><div className="panel table-panel"><div className="panel-heading"><div><h3>Transactions</h3><p>Les paiements seront synchronisés avec le backend.</p></div></div><div className="empty-table"><CreditCard size={22} /><span>Aucun paiement à afficher</span></div></div><div className="demo-note"><LockKeyhole size={17} /><span>Un ticket ne sera jamais activé sur la seule base d’une redirection du navigateur. La confirmation devra être vérifiée côté serveur.</span></div></div>}
-            {section === "plans" && <div className="dashboard-content"><div className="section-intro"><div><h2>Forfaits Wi-Fi</h2><p>Les tarifs et limites seront configurables depuis cet espace.</p></div><button className="button button-primary" onClick={() => submitDemo("L’édition des forfaits sera activée avec Supabase.")}><Plus size={16} /> Nouveau forfait</button></div><div className="admin-plans">{plans.map((plan) => <div className="admin-plan-card" key={plan.id}><div className="plan-icon"><Clock3 /></div><div><b>{plan.name}</b><small>{plan.duration}</small></div><span className="plan-price">Tarif à définir</span><button className="icon-button" onClick={() => submitDemo("L’édition sera disponible après connexion de la base de données.")}><Settings size={17} /></button></div>)}</div></div>}
+            {section === "plans" && <div className="dashboard-content"><div className="section-intro"><div><h2>Forfaits Wi-Fi</h2><p>Les tarifs et limites seront configurables depuis cet espace.</p></div><button className="button button-primary" onClick={() => submitDemo("L’édition des forfaits sera activée avec Supabase.")}><Plus size={16} /> Nouveau forfait</button></div><div className="admin-plans">{plans.map((plan) => <div className="admin-plan-card" key={plan.id}><div className="plan-icon"><Clock3 /></div><div><b>{plan.name}</b><small>{plan.duration}</small></div><span className="plan-price">{plan.price === "—" ? "Tarif à définir" : plan.price}</span><button className="icon-button" onClick={() => submitDemo("L’édition sera disponible après connexion de la base de données.")}><Settings size={17} /></button></div>)}</div></div>}
             {section === "settings" && <div className="dashboard-content"><div className="section-intro"><div><h2>Paramètres du système</h2><p>Configuration des services et du réseau.</p></div></div><div className="settings-grid"><div className="panel setting-card"><div className="setting-icon"><Radio /></div><h3>Routeur MikroTik</h3><p>Connexion sécurisée au routeur HotSpot.</p><span className="offline-label"><span /> Non configuré</span><button className="button button-outline" onClick={() => submitDemo("La configuration MikroTik sera faite depuis le backend sécurisé.")}>Configurer plus tard</button></div><div className="panel setting-card"><div className="setting-icon"><Globe2 /></div><h3>Portail client</h3><p>Adresse et paramètres du portail captif.</p><span className="pending-chip">En préparation</span></div><div className="panel setting-card"><div className="setting-icon"><ShieldCheck /></div><h3>Sécurité</h3><p>Accès administrateur et journal des actions.</p><span className="pending-chip">À configurer</span></div></div></div>}
           </main>
         </div>
