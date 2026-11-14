@@ -1,0 +1,173 @@
+import { createServer } from "node:http";
+import { createClient } from "@supabase/supabase-js";
+
+const PORT = Number(process.env.PORT || 10000);
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "https://skynetht-wifi.vercel.app";
+
+const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  : null;
+
+function send(res, status, data, origin) {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    ...(origin ? { "Access-Control-Allow-Origin": origin, "Vary": "Origin" } : {}),
+  });
+  res.end(JSON.stringify(data));
+}
+
+async function readBody(req) {
+  let raw = "";
+  for await (const chunk of req) {
+    raw += chunk;
+    if (raw.length > 16_384) throw new Error("Request body too large");
+  }
+  return raw ? JSON.parse(raw) : {};
+}
+
+async function requireUser(req, res, origin, admin = false) {
+  const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  if (!token || !supabase) {
+    send(res, token ? 503 : 401, { error: token ? "API_NOT_CONFIGURED" : "UNAUTHORIZED" }, origin);
+    return null;
+  }
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) {
+    send(res, 401, { error: "INVALID_SESSION" }, origin);
+    return null;
+  }
+  if (admin) {
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles").select("role").eq("id", user.id).maybeSingle();
+    if (profileError || profile?.role !== "admin") {
+      send(res, 403, { error: "ADMIN_REQUIRED" }, origin);
+      return null;
+    }
+  }
+  return user;
+}
+
+const server = createServer(async (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && origin !== ALLOWED_ORIGIN) {
+    send(res, 403, { error: "ORIGIN_NOT_ALLOWED" });
+    return;
+  }
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization",
+      "Access-Control-Max-Age": "86400",
+      Vary: "Origin",
+    });
+    res.end();
+    return;
+  }
+
+  try {
+    const url = new URL(req.url || "/", "http://localhost");
+    if (req.method === "GET" && url.pathname === "/health") {
+      send(res, 200, { status: "ok", service: "skynet-wifi-api", supabaseConfigured: Boolean(supabase) }, origin);
+      return;
+    }
+    if (!supabase) {
+      send(res, 503, { error: "BACKEND_CONFIGURATION_REQUIRED" }, origin);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/plans") {
+      const { data, error } = await supabase
+        .from("wifi_plans")
+        .select("id,code,name,duration_seconds,price,currency,download_speed_mbps,upload_speed_mbps,starts_on_first_login")
+        .eq("is_active", true)
+        .order("display_order", { ascending: true });
+      if (error) throw error;
+      send(res, 200, { plans: data || [] }, origin);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/me") {
+      const user = await requireUser(req, res, origin);
+      if (!user) return;
+      const { data: profile, error } = await supabase
+        .from("profiles").select("id,full_name,phone,role,created_at").eq("id", user.id).maybeSingle();
+      if (error) throw error;
+      send(res, 200, { user: { id: user.id, email: user.email }, profile }, origin);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/payments") {
+      const user = await requireUser(req, res, origin);
+      if (!user) return;
+      const body = await readBody(req);
+      const allowedMethods = ["cash", "moncash", "natcash", "bank_transfer", "other"];
+      if (!body.planId || !allowedMethods.includes(body.paymentMethod) || typeof body.customerPhone !== "string" || body.customerPhone.trim().length < 7) {
+        send(res, 400, { error: "INVALID_PAYMENT_REQUEST" }, origin);
+        return;
+      }
+      const { data: plan, error: planError } = await supabase
+        .from("wifi_plans").select("id,price,currency,is_active").eq("id", body.planId).maybeSingle();
+      if (planError) throw planError;
+      if (!plan || !plan.is_active || plan.price == null || Number(plan.price) <= 0) {
+        send(res, 409, { error: "PLAN_NOT_PURCHASABLE" }, origin);
+        return;
+      }
+      const { data: payment, error } = await supabase.from("payments").insert({
+        user_id: user.id,
+        plan_id: plan.id,
+        amount: plan.price,
+        currency: plan.currency,
+        payment_method: body.paymentMethod,
+        customer_phone: body.customerPhone.trim(),
+        payment_reference: typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0, 120) : null,
+        status: "pending",
+      }).select("id,amount,currency,payment_method,status,created_at").single();
+      if (error) throw error;
+      send(res, 201, { payment }, origin);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/summary") {
+      const user = await requireUser(req, res, origin, true);
+      if (!user) return;
+      const [customers, pending, activeTickets, plans] = await Promise.all([
+        supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer"),
+        supabase.from("payments").select("id", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("wifi_tickets").select("id", { count: "exact", head: true }).eq("status", "active"),
+        supabase.from("wifi_plans").select("id", { count: "exact", head: true }).eq("is_active", true),
+      ]);
+      const failure = [customers, pending, activeTickets, plans].find((item) => item.error);
+      if (failure?.error) throw failure.error;
+      send(res, 200, { customers: customers.count || 0, pendingPayments: pending.count || 0, activeTickets: activeTickets.count || 0, activePlans: plans.count || 0 }, origin);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/payments") {
+      const user = await requireUser(req, res, origin, true);
+      if (!user) return;
+      const { data, error } = await supabase
+        .from("payments")
+        .select("id,amount,currency,payment_method,customer_phone,payment_reference,status,created_at, wifi_plans(name,code)")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      send(res, 200, { payments: data || [] }, origin);
+      return;
+    }
+
+    send(res, 404, { error: "NOT_FOUND" }, origin);
+  } catch (error) {
+    console.error("API request failed:", error?.message || error);
+    send(res, 500, { error: "INTERNAL_SERVER_ERROR" }, origin);
+  }
+});
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Skynet Wi-Fi API listening on port ${PORT}`);
+});
