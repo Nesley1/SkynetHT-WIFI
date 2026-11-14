@@ -607,12 +607,16 @@ const server = createServer(async (req, res) => {
       const paymentId = confirmPaymentMatch[1];
       const { data: payment, error: paymentError } = await supabase
         .from("payments")
-        .select("id,status,plan_id,wifi_plans(name,code,duration_seconds,starts_on_first_login)")
+        .select("id,status,plan_id,provider_payload,wifi_plans(name,code,duration_seconds,starts_on_first_login)")
         .eq("id", paymentId)
         .maybeSingle();
       if (paymentError) throw paymentError;
       if (!payment) {
         send(res, 404, { error: "PAYMENT_NOT_FOUND" }, origin);
+        return;
+      }
+      if (payment.provider_payload?.provider === "tranzak") {
+        send(res, 409, { error: "TRANZAK_PAYMENT_MUST_BE_CONFIRMED_BY_PROVIDER" }, origin);
         return;
       }
       if (payment.status !== "pending") {
@@ -667,6 +671,13 @@ const server = createServer(async (req, res) => {
     if (rejectPaymentId && /^[0-9a-f-]{36}$/i.test(rejectPaymentId)) {
       const user = await requireUser(req, res, origin, true);
       if (!user) return;
+      const { data: targetPayment, error: targetPaymentError } = await supabase
+        .from("payments").select("provider_payload").eq("id", rejectPaymentId).maybeSingle();
+      if (targetPaymentError) throw targetPaymentError;
+      if (targetPayment?.provider_payload?.provider === "tranzak") {
+        send(res, 409, { error: "TRANZAK_PAYMENT_STATUS_IS_MANAGED_AUTOMATICALLY" }, origin);
+        return;
+      }
       const { data: result, error } = await supabase.rpc("admin_reject_wifi_payment", {
         p_payment_id: rejectPaymentId,
         p_admin_id: user.id,
