@@ -213,7 +213,7 @@ export default function App() {
       if (authMode === "signup") {
         const { data, error: signError } = await supabase.auth.signUp({
           email: authEmail.trim(), password: authPassword,
-          options: { data: { full_name: fullName.trim(), phone: phone.trim() } },
+          options: { data: { full_name: fullName.trim(), phone: phone.trim() }, emailRedirectTo: window.location.origin },
         });
         if (signError) throw signError;
         if (!data.session) {
