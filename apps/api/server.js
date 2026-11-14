@@ -404,7 +404,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "PUT" && url.pathname === "/api/admin/customer-benefits/global-discount") {
       const user = await requireUser(req,res,origin,true); if (!user) return; const body=await readBody(req); const percent=Number(body.percent||0);
-      if (!Number.isFinite(percent)||percent<0||percent>100) { send(res,400,{error:"INVALID_DISCOUNT"},origin); return; }
+      if (!Number.isFinite(percent)||percent<0||percent>=100) { send(res,400,{error:"INVALID_DISCOUNT"},origin); return; }
       const {error}=await supabase.from("system_settings").upsert({key:"global_customer_discount",value:{percent},updated_by:user.id,updated_at:new Date().toISOString()},{onConflict:"key"}); if(error) throw error; send(res,200,{percent},origin); return;
     }
     if (req.method === "PUT" && url.pathname === "/api/admin/customer-benefits/individual-discount") {
