@@ -124,7 +124,7 @@ const server = createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
-      "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type,Authorization",
       "Access-Control-Max-Age": "86400",
       Vary: "Origin",
@@ -176,6 +176,7 @@ const server = createServer(async (req, res) => {
             provider_payload: { ...payment.provider_payload, final_status: "failed", failure_reason: event.data.failure_reason || null } })
           .eq("id", payment.id).eq("status", "pending");
         if (updateError) throw updateError;
+      }
 
       send(res, 200, { received: true });
       return;
