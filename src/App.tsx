@@ -130,6 +130,14 @@ export default function App() {
   const [customerNotices, setCustomerNotices] = useState<{id:string;reason:string;created_at:string}[]>([]);
   const [profileNameDraft, setProfileNameDraft] = useState("");
   const [profilePhoneDraft, setProfilePhoneDraft] = useState("");
+  const [globalDiscount, setGlobalDiscount] = useState("0");
+  const [individualDiscounts, setIndividualDiscounts] = useState<{user_id:string;percent:number;enabled:boolean}[]>([]);
+  const [serviceNotices, setServiceNotices] = useState<{id:string;scope:string;user_id:string|null;reason:string;active:boolean;created_at:string}[]>([]);
+  const [benefitCustomerId, setBenefitCustomerId] = useState("");
+  const [individualDiscountPercent, setIndividualDiscountPercent] = useState("0");
+  const [noticeScope, setNoticeScope] = useState<"global"|"individual">("global");
+  const [noticeCustomerId, setNoticeCustomerId] = useState("");
+  const [noticeReason, setNoticeReason] = useState("");
 
   const notify = (message: string) => { setNotice(message); setError(""); };
   const fail = (message: string) => { setError(message); setNotice(""); };
