@@ -492,7 +492,7 @@ const server = createServer(async (req, res) => {
       if (!user) return;
       const { data, error } = await supabase
         .from("payments")
-        .select("id,amount,currency,payment_method,customer_phone,payment_reference,status,created_at, wifi_plans(name,code)")
+        .select("id,amount,currency,payment_method,customer_phone,payment_reference,status,provider_payload,created_at, wifi_plans(name,code)")
         .order("created_at", { ascending: false })
         .limit(100);
       if (error) throw error;
