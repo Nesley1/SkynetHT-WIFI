@@ -314,11 +314,15 @@ const server = createServer(async (req, res) => {
             transaction_id: String(providerBody.transaction_id),
             amount: String(providerBody.amount),
             currency: String(providerBody.currency),
+            original_plan_amount: String(plan.price),
+            original_plan_currency: String(plan.currency),
             payment_method: body.paymentMethod,
             provider_status: String(providerBody.status || "processing"),
           };
           const { error: saveError } = await supabase.from("payments").update({
             provider_reference: String(providerBody.transaction_id),
+            amount: providerAmount,
+            currency: String(providerBody.currency),
             provider_payload: payload,
             updated_at: new Date().toISOString(),
           }).eq("id", payment.id).eq("status", "pending");
