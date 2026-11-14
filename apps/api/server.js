@@ -261,6 +261,16 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      const [{ data: individualDiscount, error: individualDiscountError }, { data: globalDiscountSetting, error: globalDiscountError }] = await Promise.all([
+        supabase.from("customer_discounts").select("percent,enabled").eq("user_id", user.id).maybeSingle(),
+        supabase.from("system_settings").select("value").eq("key", "global_customer_discount").maybeSingle(),
+      ]);
+      if (individualDiscountError) throw individualDiscountError;
+      if (globalDiscountError) throw globalDiscountError;
+      const discountPercent = individualDiscount?.enabled ? Number(individualDiscount.percent) : Number(globalDiscountSetting?.value?.percent || 0);
+      const finalPrice = Math.round(Number(plan.price) * (1 - discountPercent / 100) * 100) / 100;
+      if (finalPrice <= 0) { send(res, 409, { error: "DISCOUNTED_PRICE_INVALID" }, origin); return; }
+
       const useTranzak = ["moncash", "natcash"].includes(body.paymentMethod);
       if (useTranzak && (!process.env.TRANZAK_API_KEY || !process.env.TRANZAK_WEBHOOK_SECRET)) {
         send(res, 503, { error: "TRANZAK_NOT_CONFIGURED" }, origin);
@@ -278,7 +288,7 @@ const server = createServer(async (req, res) => {
       const { data: payment, error } = await supabase.from("payments").insert({
         user_id: user.id,
         plan_id: plan.id,
-        amount: plan.price,
+        amount: finalPrice,
         currency: plan.currency,
         payment_method: body.paymentMethod,
         customer_phone: body.customerPhone.trim(),
@@ -296,7 +306,7 @@ const server = createServer(async (req, res) => {
             method: "POST",
             headers: { "X-Api-Key": process.env.TRANZAK_API_KEY, "Content-Type": "application/json", Accept: "application/json" },
             body: JSON.stringify({
-              amount: Number(plan.price),
+              amount: finalPrice,
               currency: plan.currency,
               payment_method: body.paymentMethod,
               customer_name: customerName,
@@ -325,6 +335,7 @@ const server = createServer(async (req, res) => {
             amount: String(providerBody.amount),
             currency: String(providerBody.currency),
             original_plan_amount: String(plan.price),
+            discount_percent: discountPercent,
             original_plan_currency: String(plan.currency),
             payment_method: body.paymentMethod,
             provider_status: String(providerBody.status || "processing"),
