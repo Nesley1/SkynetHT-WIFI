@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import {
-  Activity, ArrowRight, CalendarClock, Check, CheckCircle2, Clock3,
-  CreditCard, Gauge, Globe2, LayoutDashboard, LifeBuoy, LockKeyhole,
+  ArrowRight, CalendarClock, Check, CheckCircle2, Clock3,
+  CreditCard, Gauge, Globe2, LayoutDashboard, LockKeyhole,
   LogOut, Menu, Plus, Radio, RefreshCw, Search, Settings, ShieldCheck,
-  Signal, Ticket, Users, Wallet, Wifi, X, Zap, Ban, RotateCcw,
+  Signal, Ticket, Users, Wallet, Wifi, X, Zap, Ban,
 } from "lucide-react";
 
 const API_URL = (import.meta.env.VITE_API_URL || "https://skynetht-wifi-api.onrender.com").replace(/\/$/, "");
