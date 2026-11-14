@@ -102,6 +102,8 @@ export default function App() {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [signupConfirmationEmail, setSignupConfirmationEmail] = useState("");
+  const [resendBusy, setResendBusy] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("moncash");
   const [paymentReference, setPaymentReference] = useState("");
@@ -232,7 +234,7 @@ export default function App() {
         if (signError) throw signError;
         if (!data.session) {
           setAuthOpen(false);
-          notify("Compte créé. Vérifiez votre e-mail pour confirmer l’inscription avant de vous connecter.");
+          setSignupConfirmationEmail(authEmail.trim());
         } else {
           setAuthOpen(false);
           notify("Votre compte est créé.");
@@ -246,6 +248,17 @@ export default function App() {
       }
     } catch (e) { fail((e as Error).message); }
     finally { setAuthBusy(false); }
+  };
+
+  const resendSignupConfirmation = async () => {
+    if (!signupConfirmationEmail) return;
+    setResendBusy(true);
+    try {
+      const { error: resendError } = await supabase.auth.resend({ type: "signup", email: signupConfirmationEmail, options: { emailRedirectTo: window.location.origin } });
+      if (resendError) throw resendError;
+      notify("Un nouvel e-mail de confirmation vient d’être demandé.");
+    } catch (e) { fail((e as Error).message); }
+    finally { setResendBusy(false); }
   };
 
   const handleSignOut = async () => { await supabase.auth.signOut(); setMode("customer"); setSection("overview"); notify("Vous êtes déconnecté."); };
@@ -419,7 +432,7 @@ export default function App() {
         </div>
       )}
 
-      {authOpen&&<AuthModal authMode={authMode} setAuthMode={setAuthMode} authEmail={authEmail} setAuthEmail={setAuthEmail} authPassword={authPassword} setAuthPassword={setAuthPassword} fullName={fullName} setFullName={setFullName} phone={phone} setPhone={setPhone} authBusy={authBusy} error={error} onSubmit={handleAuth} onClose={()=>setAuthOpen(false)}/>}
+      {authOpen&&<AuthModal authMode={authMode} setAuthMode={setAuthMode} authEmail={authEmail} setAuthEmail={setAuthEmail} authPassword={authPassword} setAuthPassword={setAuthPassword} fullName={fullName} setFullName={setFullName} phone={phone} setPhone={setPhone} authBusy={authBusy} error={error} onSubmit={handleAuth} onClose={()=>setAuthOpen(false)}/>}{signupConfirmationEmail&&<Modal title="Vérifiez votre boîte e-mail" onClose={()=>setSignupConfirmationEmail("")}><div className="email-confirm-card"><div className="email-confirm-icon"><CheckCircle2 size={30}/></div><h3>Encore une petite étape !</h3><p>Votre compte Skynet Wi-Fi a été créé. Nous venons de vous envoyer un e-mail de confirmation à :</p><strong className="email-confirm-address">{signupConfirmationEmail}</strong><p>Ouvrez cet e-mail et cliquez sur le bouton <b>Confirmer mon adresse e-mail</b> pour activer votre compte. Pensez aussi à vérifier vos courriers indésirables (Spam).</p><button className="button button-primary full-button" disabled={resendBusy} onClick={resendSignupConfirmation}>{resendBusy?"Envoi en cours…":"Renvoyer l’e-mail de confirmation"}</button><p className="field-help">Vous pourrez vous connecter après avoir confirmé votre adresse.</p></div></Modal>}
       {paymentOpen&&chosenPlan&&<Modal title="Demande de paiement" onClose={()=>setPaymentOpen(false)}><form onSubmit={submitPayment}><p className="modal-lead">{chosenPlan.name} · {formatDuration(chosenPlan.duration_seconds)} · <b>{money(chosenPlan.price,chosenPlan.currency)}</b></p><label className="field-label">Votre numéro de téléphone</label><input className="field-input" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Ex. 4077 0000" inputMode="tel" required/><label className="field-label">Moyen de paiement</label><select className="field-input" value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)}><option value="moncash">MonCash</option><option value="natcash">NatCash</option><option value="cash">Espèces</option><option value="bank_transfer">Virement bancaire</option><option value="other">Autre</option></select><label className="field-label">Référence du paiement (facultatif)</label><input className="field-input" value={paymentReference} onChange={e=>setPaymentReference(e.target.value)} placeholder="Référence de transaction"/><p className="field-help">La demande restera en attente jusqu’à ce que l’administrateur vérifie et confirme la réception des fonds.</p><button className="button button-primary full-button" disabled={busy}>{busy?"Enregistrement…":"Envoyer la demande"} <ArrowRight size={16}/></button></form></Modal>}
       {issuedCode&&<Modal title="Ticket créé" onClose={()=>setIssuedCode("")}><p className="modal-lead">Copiez et conservez ce code. Il ne sera pas réaffiché après fermeture.</p><div className="issued-code">{issuedCode}</div><button className="button button-primary full-button" onClick={()=>navigator.clipboard?.writeText(issuedCode).then(()=>notify("Code copié."))}>Copier le code</button></Modal>}
       {notice&&<Toast message={notice} onClose={()=>setNotice("")}/>}
