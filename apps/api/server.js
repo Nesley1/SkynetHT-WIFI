@@ -167,7 +167,7 @@ const server = createServer(async (req, res) => {
         .eq("provider_reference", String(event.data.transaction_id))
         .maybeSingle();
       if (error) throw error;
-      if (!payment) { send(res, 200, { received: true, ignored: true }); return; }
+      if (!payment) { send(res, 503, { error: "PAYMENT_NOT_YET_LINKED" }); return; }
       if (event.event === "payment.success") {
         await finalizeTranzakPayment(payment, event.data);
       } else if (event.event === "payment.failed" && payment.status === "pending" && payment.provider_payload?.provider === "tranzak") {
@@ -182,6 +182,10 @@ const server = createServer(async (req, res) => {
             provider_payload: { ...payment.provider_payload, final_status: "refunded" } })
           .eq("id", payment.id).eq("status", "confirmed");
         if (refundError) throw refundError;
+        const { error: ticketError } = await supabase.from("wifi_tickets")
+          .update({ status: "revoked", updated_at: new Date().toISOString() })
+          .eq("payment_id", payment.id).in("status", ["created", "active"]);
+        if (ticketError) throw ticketError;
       }
       send(res, 200, { received: true });
       return;
