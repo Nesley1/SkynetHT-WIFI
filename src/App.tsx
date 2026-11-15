@@ -18,7 +18,7 @@ type Plan = {
   display_order: number; upload_speed_mbps?: number | null;
   download_speed_mbps?: number | null; starts_on_first_login: boolean;
 };
-type Profile = { id: string; full_name: string | null; phone: string | null; role: string; email?: string | null; created_at?: string };
+type Profile = { id: string; full_name: string | null; phone: string | null; role: string; email?: string | null; customer_reference?: string | null; created_at?: string };
 type Payment = {
   id: string; user_id?: string | null; amount: number; currency: string;
   payment_method: string; customer_phone: string | null; payment_reference: string | null;
@@ -592,6 +592,7 @@ export default function App() {
           {session && customerView === "account" && <section className="customer-account-section">
             <div className="customer-view-heading"><button className="customer-back-button" onClick={returnCustomerPage}><ArrowLeft size={16}/> Retour</button><div className="eyebrow">ESPACE CLIENT</div><h2>Mon compte</h2><p>Gérez vos coordonnées et la sécurité de votre compte.</p></div>
             {customerNotices.map(n=><div className="panel customer-info-panel" key={n.id}><b>Information importante</b><p>{n.reason}</p><small>{date(n.created_at)}</small></div>)}
+            <div className="panel customer-reference-card"><div><span>VOTRE RÉFÉRENCE CLIENT</span><strong>{profile?.customer_reference || "En cours de génération"}</strong><small>Cette référence est personnelle. Conservez-la pour identifier votre compte auprès de Skynet Wi-Fi.</small></div></div>
             {customerDiscount.percent>0 && <div className="panel customer-info-panel"><b>Votre rabais : {customerDiscount.percent}%</b><p>Cette réduction sera automatiquement appliquée lors de votre paiement.</p></div>}
             <form className="panel customer-settings-form" onSubmit={saveCustomerProfile}><h3>Mes informations</h3><div><label>Nom complet</label><input value={profileNameDraft} onChange={e=>setProfileNameDraft(e.target.value)} required minLength={2}/></div><div><label>Adresse e-mail</label><input value={profile?.email||""} readOnly/></div><div><label>Numéro de téléphone</label><input type="tel" inputMode="tel" value={profilePhoneDraft} onChange={e=>setProfilePhoneDraft(e.target.value)} required minLength={7}/></div><button className="button button-primary" disabled={busy}>Enregistrer mes informations</button></form>
             <form className="panel customer-settings-form" onSubmit={changeCustomerPassword}><h3><KeyRound size={18}/> Changer mon mot de passe</h3><div><label>Mot de passe actuel</label><input type="password" autoComplete="current-password" value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)} required/></div><div><label>Nouveau mot de passe</label><input type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={e=>setNewPassword(e.target.value)} required/><small>8 caractères minimum.</small></div><div><label>Confirmer le nouveau mot de passe</label><input type="password" autoComplete="new-password" minLength={8} value={confirmNewPassword} onChange={e=>setConfirmNewPassword(e.target.value)} required/></div><button className="button button-primary" disabled={busy}>Mettre à jour le mot de passe</button></form>
