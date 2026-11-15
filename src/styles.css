@@ -746,3 +746,8 @@
 .manual-payment-toggle span{font-size:10px;font-weight:800;color:#2675ad}
 .manual-payment-settings-form>.button{justify-self:start}
 @media(max-width:760px){.manual-payment-columns{grid-template-columns:1fr}.manual-payment-settings-form>.button{width:100%}}
+
+
+/* Payment dialog: allow customers to scroll through all payment details on small and tall screens. */
+.payment-modal{display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;overscroll-behavior:contain;padding:12px;-webkit-overflow-scrolling:touch}
+.payment-modal .modal-card{max-height:calc(100dvh - 24px);overflow-y:auto;overscroll-behavior:contain;margin:auto 0;-webkit-overflow-scrolling:touch}
