@@ -710,3 +710,12 @@
 .admin-layout .data-table .payment-reference-cell small{font-size:8px;text-transform:uppercase;letter-spacing:.45px;color:#8998a7;font-weight:800;margin-top:5px}
 .admin-layout .data-table .payment-reference-cell b{font-size:9px;color:#36536c;max-width:190px;overflow-wrap:anywhere;font-weight:700}
 .admin-layout .data-table .payment-reference-cell small:not(:first-child){margin-top:10px}
+
+
+/* Customer account: personal customer reference */
+.customer-reference-card{padding:18px 20px;margin:0 0 16px;border:1px solid #d9e9f6;background:linear-gradient(135deg,#f5faff,#fff);display:flex;align-items:center;justify-content:space-between}
+.customer-reference-card>div{display:grid;gap:7px}
+.customer-reference-card span{font-size:9px;font-weight:900;letter-spacing:1px;color:#64839d}
+.customer-reference-card strong{font:800 23px Manrope,sans-serif;letter-spacing:.3px;color:#126fb5}
+.customer-reference-card small{font-size:11px;line-height:1.5;color:#7b8d9c}
+@media(max-width:760px){.customer-reference-card{padding:16px}.customer-reference-card strong{font-size:21px}}
