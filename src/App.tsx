@@ -768,7 +768,7 @@ export default function App() {
       )}
 
       {authOpen&&<AuthModal authMode={authMode} setAuthMode={setAuthMode} authEmail={authEmail} setAuthEmail={setAuthEmail} authPassword={authPassword} setAuthPassword={setAuthPassword} fullName={fullName} setFullName={setFullName} phone={phone} setPhone={setPhone} authBusy={authBusy} error={error} onSubmit={handleAuth} onClose={()=>setAuthOpen(false)}/>}{signupConfirmationEmail&&<Modal title="Vérifiez votre boîte e-mail" onClose={()=>setSignupConfirmationEmail("")}><div className="email-confirm-card"><div className="email-confirm-icon"><CheckCircle2 size={30}/></div><h3>Encore une petite étape !</h3><p>Votre compte Skynet Wi-Fi a été créé. Nous venons de vous envoyer un e-mail de confirmation à :</p><strong className="email-confirm-address">{signupConfirmationEmail}</strong><p>Ouvrez cet e-mail et cliquez sur le bouton <b>Confirmer mon adresse e-mail</b> pour activer votre compte. Pensez aussi à vérifier vos courriers indésirables (Spam).</p><button className="button button-primary full-button" disabled={resendBusy} onClick={resendSignupConfirmation}>{resendBusy?"Envoi en cours…":"Renvoyer l’e-mail de confirmation"}</button><p className="field-help">Vous pourrez vous connecter après avoir confirmé votre adresse.</p></div></Modal>}
-      {paymentOpen&&chosenPlan&&<Modal title="Demande de paiement" onClose={()=>setPaymentOpen(false)}><form onSubmit={submitPayment}>
+      {paymentOpen&&chosenPlan&&<Modal title="Demande de paiement" className="payment-modal" onClose={()=>setPaymentOpen(false)}><form onSubmit={submitPayment}>
         <p className="modal-lead">{chosenPlan.name} · {formatDuration(chosenPlan.duration_seconds)} · <b>{money(Number(chosenPlan.price)*(1-customerDiscount.percent/100),chosenPlan.currency)}</b>{customerDiscount.percent>0&&<small> (rabais de {customerDiscount.percent}% inclus)</small>}</p>
         <label className="field-label">Votre numéro de téléphone</label><input className="field-input" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Ex. 4077 0000" inputMode="tel" required/>
         <label className="field-label">Choisissez votre mode de paiement</label>
@@ -793,8 +793,8 @@ function Stat({icon,label,value,note,tone}:{icon:React.ReactNode;label:string;va
 }
 function Status({value}:{value:string}) { return <span className={`record-status status-${value}`}>{statusLabel(value)}</span>; }
 function Toast({message,onClose}:{message:string;onClose:()=>void}) { return <div className="toast"><CheckCircle2 size={18}/>{message}<button onClick={onClose}><X size={15}/></button></div>; }
-function Modal({title,onClose,children}:{title:string;onClose:()=>void;children:React.ReactNode}) {
-  return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><div className="modal-card"><div className="modal-header"><h2>{title}</h2><button className="icon-button" onClick={onClose}><X size={19}/></button></div>{children}</div></div>;
+function Modal({title,onClose,children,className=""}:{title:string;onClose:()=>void;children:React.ReactNode;className?:string}) {
+  return <div className={"modal-backdrop "+className} onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><div className="modal-card"><div className="modal-header"><h2>{title}</h2><button className="icon-button" onClick={onClose}><X size={19}/></button></div>{children}</div></div>;
 }
 function AuthModal(props:{
   authMode:"login"|"signup";setAuthMode:(v:"login"|"signup")=>void;authEmail:string;setAuthEmail:(v:string)=>void;
