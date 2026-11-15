@@ -46,9 +46,22 @@ async function readBody(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
-function createTicketCode() {
+function ticketPlanPrefix(plan) {
+  const seconds = Number(plan?.duration_seconds);
+  if (Number.isSafeInteger(seconds) && seconds > 0) {
+    if (seconds % 86400 === 0) return `Sky-${seconds / 86400}D`;
+    if (seconds % 3600 === 0) return `Sky-${seconds / 3600}h`;
+    if (seconds % 60 === 0) return `Sky-${seconds / 60}m`;
+  }
+
+  const code = String(plan?.code || "").trim().replace(/[^a-zA-Z0-9]/g, "");
+  const name = String(plan?.name || "").trim().replace(/[^a-zA-Z0-9]/g, "");
+  return `Sky-${code || name || "WiFi"}`;
+}
+
+function createTicketCode(plan) {
   const suffix = randomBytes(6).toString("hex").toUpperCase();
-  return `SKY-${suffix.slice(0, 6)}-${suffix.slice(6)}`;
+  return `${ticketPlanPrefix(plan)}-${suffix.slice(0, 6)}-${suffix.slice(6)}`;
 }
 
 async function requireUser(req, res, origin, admin = false) {
@@ -102,7 +115,7 @@ async function finalizeTranzakPayment(payment, providerPayment) {
   }
 
   if (providerPayment.status !== "completed") return { status: payment.status };
-  const ticketCode = createTicketCode();
+  const ticketCode = createTicketCode(payment.wifi_plans);
   const codeHash = createHash("sha256").update(ticketCode, "utf8").digest("hex");
   const { data: result, error } = await supabase.rpc("tranzak_confirm_wifi_payment", {
     p_payment_id: payment.id,
@@ -166,7 +179,7 @@ const server = createServer(async (req, res) => {
       }
       if (!supabase) { send(res, 503, { error: "BACKEND_CONFIGURATION_REQUIRED" }); return; }
       const { data: payment, error } = await supabase.from("payments")
-        .select("id,status,plan_id,user_id,provider_reference,provider_payload")
+        .select("id,status,plan_id,user_id,provider_reference,provider_payload,wifi_plans(code,name,duration_seconds)")
         .eq("provider_reference", String(event.data.transaction_id))
         .maybeSingle();
       if (error) throw error;
@@ -382,7 +395,7 @@ const server = createServer(async (req, res) => {
       const transactionId = typeof body.transactionId === "string" ? body.transactionId : "";
       if (!/^\\d{6,30}$/.test(transactionId)) { send(res, 400, { error: "INVALID_TRANSACTION_ID" }, origin); return; }
       const { data: payment, error } = await supabase.from("payments")
-        .select("id,status,plan_id,user_id,provider_reference,provider_payload")
+        .select("id,status,plan_id,user_id,provider_reference,provider_payload,wifi_plans(code,name,duration_seconds)")
         .eq("provider_reference", transactionId).eq("user_id", user.id).maybeSingle();
       if (error) throw error;
       if (!payment || payment.provider_payload?.provider !== "tranzak") {
@@ -592,7 +605,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const ticketCode = createTicketCode();
+      const ticketCode = createTicketCode(plan);
       const codeHash = createHash("sha256").update(ticketCode, "utf8").digest("hex");
       const { data: result, error } = await supabase.rpc("admin_create_wifi_ticket", {
         p_plan_id: plan.id,
@@ -696,7 +709,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const ticketCode = createTicketCode();
+      const ticketCode = createTicketCode(payment.wifi_plans);
       const codeHash = createHash("sha256").update(ticketCode, "utf8").digest("hex");
       const { data: result, error } = await supabase.rpc("admin_confirm_wifi_payment", {
         p_payment_id: paymentId,
