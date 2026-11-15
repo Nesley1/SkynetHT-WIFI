@@ -388,7 +388,7 @@ const server = createServer(async (req, res) => {
             body: JSON.stringify({
               amount: finalPrice,
               currency: plan.currency,
-              payment_method: body.paymentMethod,
+              payment_method: paymentMethod,
               customer_name: customerName,
               customer_email: user.email || undefined,
               customer_phone: customerPhone,
@@ -417,7 +417,7 @@ const server = createServer(async (req, res) => {
             original_plan_amount: String(plan.price),
             discount_percent: discountPercent,
             original_plan_currency: String(plan.currency),
-            payment_method: body.paymentMethod,
+            payment_method: paymentMethod,
             provider_status: String(providerBody.status || "processing"),
           };
           const { error: saveError } = await supabase.from("payments").update({
