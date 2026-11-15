@@ -628,7 +628,7 @@ export default function App() {
                 <div className="report-preview-stats">
                   <div><small>Clients</small><b>{customers.length}</b></div><div><small>Paiements</small><b>{payments.length}</b></div><div><small>Tickets</small><b>{tickets.length}</b></div><div><small>Revenus HTG</small><b>{money(summary?.revenue?.HTG??0,"HTG")}</b></div><div><small>Revenus USD</small><b>{money(summary?.revenue?.USD??0,"USD")}</b></div>
                 </div>
-                <div className="report-actions"><button className="button button-primary" onClick={()=>openReport(false)}><FileDown size={16}/> Télécharger PDF</button><button className="button button-outline" onClick={()=>openReport(true)}><Printer size={16}/> Imprimer</button></div>
+                <div className="report-actions"><button className="button button-primary" onClick={()=>openReport(true)}><FileDown size={16}/> Télécharger PDF</button><button className="button button-outline" onClick={()=>openReport(true)}><Printer size={16}/> Imprimer</button></div>
                 <p className="report-help">Le document imprimable comprend l’identité Skynet Wi-Fi, la date et l’heure de génération, les statistiques financières ainsi que les registres détaillés des paiements, tickets et clients. Pour obtenir le PDF, choisissez « Enregistrer au format PDF » dans la fenêtre d’impression.</p>
               </div>
             </div>}
