@@ -4,7 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import {
   ArrowLeft, ArrowRight, CalendarClock, Check, CheckCircle2, Clock3,
-  CreditCard, FileDown, Gauge, Globe2, LayoutDashboard, LockKeyhole,
+  CreditCard, Gauge, Globe2, LayoutDashboard, LockKeyhole,
   LogOut, Menu, Plus, Radio, RefreshCw, Search, Settings, ShieldCheck,
   Signal, Ticket, Users, UserRound, ClipboardList, FileText, KeyRound, Wallet, Wifi, X, Zap, Ban, Printer,
 } from "lucide-react";
@@ -330,7 +330,7 @@ export default function App() {
         return !Number.isNaN(value.getTime()) && value.getFullYear()===Number(day.slice(0,4)) && value.getMonth()+1===Number(day.slice(5,7)) && value.getDate()===Number(day.slice(8,10));
       });
       const dayCustomers = reportCustomers.filter(c => {
-        const value = new Date(c.created_at);
+        const value = new Date(c.created_at || "");
         return !Number.isNaN(value.getTime()) && value.getFullYear()===Number(day.slice(0,4)) && value.getMonth()+1===Number(day.slice(5,7)) && value.getDate()===Number(day.slice(8,10));
       });
       const dayRevenue = dayPayments.filter(p=>p.status==="confirmed").reduce((totals,p)=>{totals[p.currency==="USD"?"USD":"HTG"]+=Number(p.amount)||0;return totals;},{HTG:0,USD:0});
