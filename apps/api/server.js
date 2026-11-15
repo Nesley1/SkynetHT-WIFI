@@ -203,6 +203,23 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/payment-options") {
+      const { data, error } = await supabase.from("system_settings").select("value").eq("key", "manual_payment_methods").maybeSingle();
+      if (error) throw error;
+      const settings = data?.value || {};
+      const method = (key) => {
+        const item = settings[key] || {};
+        const phone = typeof item.phone === "string" ? item.phone.trim() : "";
+        const name = typeof item.name === "string" ? item.name.trim() : "";
+        return { enabled: item.enabled === true && Boolean(phone) && Boolean(name), phone, name };
+      };
+      send(res, 200, {
+        manual: { moncash: method("moncash"), natcash: method("natcash") },
+        tranzak: { enabled: WIFI_PAYMENTS_ENABLED && Boolean(process.env.TRANZAK_API_KEY) && Boolean(process.env.TRANZAK_WEBHOOK_SECRET) },
+      }, origin);
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/plans") {
       const { data, error } = await supabase
         .from("wifi_plans")
@@ -262,12 +279,15 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/payments") {
-      if (!WIFI_PAYMENTS_ENABLED) { send(res, 503, { error: "WIFI_PAYMENTS_DISABLED" }, origin); return; }
       const user = await requireUser(req, res, origin);
       if (!user) return;
       const body = await readBody(req);
-      const allowedMethods = ["moncash", "natcash"];
-      if (!body.planId || !allowedMethods.includes(body.paymentMethod) || typeof body.customerPhone !== "string" || body.customerPhone.trim().length < 7) {
+      const automaticMethod = ["tranzak_moncash", "tranzak_natcash"].includes(body.paymentMethod);
+      const manualMethod = ["manual_moncash", "manual_natcash"].includes(body.paymentMethod);
+      const network = String(body.paymentMethod || "").replace(/^(?:tranzak_|manual_)/, "");
+      const paymentMethod = network;
+      if (!body.planId || (!automaticMethod && !manualMethod) || !["moncash", "natcash"].includes(network)
+          || typeof body.customerPhone !== "string" || body.customerPhone.trim().length < 7) {
         send(res, 400, { error: "INVALID_PAYMENT_REQUEST" }, origin);
         return;
       }
@@ -277,6 +297,39 @@ const server = createServer(async (req, res) => {
       if (!plan || !plan.is_active || plan.price == null || Number(plan.price) <= 0) {
         send(res, 409, { error: "PLAN_NOT_PURCHASABLE" }, origin);
         return;
+      }
+
+      let manualSettings = null;
+      if (manualMethod) {
+        const { data: setting, error: settingError } = await supabase.from("system_settings").select("value").eq("key", "manual_payment_methods").maybeSingle();
+        if (settingError) throw settingError;
+        manualSettings = setting?.value || {};
+        const config = manualSettings[network] || {};
+        if (config.enabled !== true || !String(config.phone || "").trim() || !String(config.name || "").trim()) {
+          send(res, 409, { error: "MANUAL_PAYMENT_METHOD_UNAVAILABLE" }, origin); return;
+        }
+        const transactionId = typeof body.transactionId === "string" ? body.transactionId.trim() : "";
+        const proofPath = typeof body.proofPath === "string" ? body.proofPath : "";
+        if (transactionId.length < 5 || transactionId.length > 100 || !/^[A-Za-z0-9._/-]+$/.test(transactionId)
+            || !proofPath.startsWith(user.id + "/") || proofPath.split("/").length !== 2) {
+          send(res, 400, { error: "INVALID_MANUAL_PAYMENT_PROOF" }, origin); return;
+        }
+        const fileName = proofPath.split("/")[1];
+        const { data: files, error: fileError } = await supabase.storage.from("wifi-payment-proofs").list(user.id, { search: fileName, limit: 10 });
+        if (fileError) throw fileError;
+        if (!(files || []).some((file) => file.name === fileName)) {
+          send(res, 400, { error: "PAYMENT_RECEIPT_NOT_FOUND" }, origin); return;
+        }
+        const { data: duplicate, error: duplicateError } = await supabase.from("payments")
+          .select("id").contains("provider_payload", { manual_transaction_id: transactionId }).limit(1).maybeSingle();
+        if (duplicateError) throw duplicateError;
+        if (duplicate) { send(res, 409, { error: "TRANSACTION_ID_ALREADY_SUBMITTED" }, origin); return; }
+      }
+      if (automaticMethod && !WIFI_PAYMENTS_ENABLED) {
+        send(res, 503, { error: "WIFI_PAYMENTS_DISABLED" }, origin); return;
+      }
+      if (automaticMethod && (!process.env.TRANZAK_API_KEY || !process.env.TRANZAK_WEBHOOK_SECRET)) {
+        send(res, 503, { error: "TRANZAK_NOT_CONFIGURED" }, origin); return;
       }
 
       const [{ data: individualDiscount, error: individualDiscountError }, { data: globalDiscountSetting, error: globalDiscountError }] = await Promise.all([
@@ -289,11 +342,7 @@ const server = createServer(async (req, res) => {
       const finalPrice = Math.round(Number(plan.price) * (1 - discountPercent / 100) * 100) / 100;
       if (finalPrice <= 0) { send(res, 409, { error: "DISCOUNTED_PRICE_INVALID" }, origin); return; }
 
-      const useTranzak = ["moncash", "natcash"].includes(body.paymentMethod);
-      if (useTranzak && (!process.env.TRANZAK_API_KEY || !process.env.TRANZAK_WEBHOOK_SECRET)) {
-        send(res, 503, { error: "TRANZAK_NOT_CONFIGURED" }, origin);
-        return;
-      }
+      const useTranzak = automaticMethod;
 
       const { data: profile, error: profileError } = await supabase
         .from("profiles").select("full_name").eq("id", user.id).maybeSingle();
@@ -308,13 +357,26 @@ const server = createServer(async (req, res) => {
         plan_id: plan.id,
         amount: finalPrice,
         currency: plan.currency,
-        payment_method: body.paymentMethod,
+        payment_method: paymentMethod,
         customer_phone: body.customerPhone.trim(),
         payment_reference: `SKY-${randomBytes(5).toString("hex").toUpperCase()}`,
-        provider_payload: useTranzak ? { provider: "tranzak", state: "creating" } : {},
+        proof_path: manualMethod ? body.proofPath : null,
+        provider_payload: useTranzak
+          ? { provider: "tranzak", state: "creating" }
+          : manualMethod ? { provider: "manual", manual_transaction_id: body.transactionId.trim() } : {},
         status: "pending",
       }).select("id,amount,currency,payment_method,status,created_at").single();
       if (error) throw error;
+
+      if (manualMethod) {
+        const config = manualSettings[network];
+        send(res, 201, {
+          payment,
+          provider: "manual",
+          instructions: { method: network, phone: String(config.phone).trim(), name: String(config.name).trim() },
+        }, origin);
+        return;
+      }
 
       if (useTranzak) {
         let providerResponse;
@@ -412,6 +474,42 @@ const server = createServer(async (req, res) => {
       const result = await finalizeTranzakPayment(payment, providerBody.data);
       send(res, 200, { paymentId: payment.id, status: result.status }, origin);
       return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/manual-payment-settings") {
+      const user = await requireUser(req, res, origin, true); if (!user) return;
+      const { data, error } = await supabase.from("system_settings").select("value").eq("key", "manual_payment_methods").maybeSingle();
+      if (error) throw error;
+      const value = data?.value || {};
+      const normalize = (key) => ({
+        enabled: value[key]?.enabled === true,
+        phone: typeof value[key]?.phone === "string" ? value[key].phone : "",
+        name: typeof value[key]?.name === "string" ? value[key].name : "",
+      });
+      send(res, 200, { moncash: normalize("moncash"), natcash: normalize("natcash") }, origin);
+      return;
+    }
+    if (req.method === "PUT" && url.pathname === "/api/admin/manual-payment-settings") {
+      const user = await requireUser(req, res, origin, true); if (!user) return;
+      const body = await readBody(req);
+      const normalize = (key) => {
+        const item = body[key] || {};
+        const enabled = item.enabled === true;
+        const phone = typeof item.phone === "string" ? item.phone.trim() : "";
+        const name = typeof item.name === "string" ? item.name.trim() : "";
+        if (enabled && (phone.length < 7 || phone.length > 30 || name.length < 2 || name.length > 100)) return null;
+        if (phone.length > 30 || name.length > 100) return null;
+        return { enabled, phone, name };
+      };
+      const moncash = normalize("moncash");
+      const natcash = normalize("natcash");
+      if (!moncash || !natcash) { send(res, 400, { error: "INVALID_MANUAL_PAYMENT_SETTINGS" }, origin); return; }
+      const { error } = await supabase.from("system_settings").upsert({
+        key: "manual_payment_methods", value: { moncash, natcash },
+        updated_by: user.id, updated_at: new Date().toISOString(),
+      }, { onConflict: "key" });
+      if (error) throw error;
+      send(res, 200, { moncash, natcash }, origin); return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/admin/customer-benefits") {
@@ -558,7 +656,7 @@ const server = createServer(async (req, res) => {
       if (!user) return;
       const { data, error } = await supabase
         .from("payments")
-        .select("id,user_id,amount,currency,payment_method,customer_phone,payment_reference,provider_reference,status,provider_payload,created_at,wifi_plans(name,code)")
+        .select("id,user_id,amount,currency,payment_method,customer_phone,payment_reference,provider_reference,status,provider_payload,proof_path,created_at,wifi_plans(name,code)")
         .order("created_at", { ascending: false })
         .limit(100);
       if (error) throw error;
@@ -575,11 +673,21 @@ const server = createServer(async (req, res) => {
         profileById = new Map((profileRows || []).map((profile) => [profile.id, profile]));
         emailById = new Map((authData.users || []).map((authUser) => [authUser.id, authUser.email || null]));
       }
-      const payments = (data || []).map((payment) => ({
-        ...payment,
-        customer_name: profileById.get(payment.user_id)?.full_name || null,
-        customer_email: emailById.get(payment.user_id) || null,
-        customer_reference: profileById.get(payment.user_id)?.customer_reference || null,
+      const payments = await Promise.all((data || []).map(async (payment) => {
+        let proofUrl = null;
+        if (payment.proof_path) {
+          const { data: signed, error: signedError } = await supabase.storage
+            .from("wifi-payment-proofs").createSignedUrl(payment.proof_path, 300);
+          if (!signedError) proofUrl = signed?.signedUrl || null;
+        }
+        return {
+          ...payment,
+          proof_url: proofUrl,
+          manual_transaction_id: payment.provider_payload?.manual_transaction_id || null,
+          customer_name: profileById.get(payment.user_id)?.full_name || null,
+          customer_email: emailById.get(payment.user_id) || null,
+          customer_reference: profileById.get(payment.user_id)?.customer_reference || null,
+        };
       }));
       send(res, 200, { payments }, origin);
       return;
@@ -686,7 +794,6 @@ const server = createServer(async (req, res) => {
       ? [null, confirmPaymentId]
       : null;
     if (confirmPaymentMatch) {
-      if (!WIFI_PAYMENTS_ENABLED) { send(res, 503, { error: "WIFI_PAYMENTS_DISABLED" }, origin); return; }
       const user = await requireUser(req, res, origin, true);
       if (!user) return;
 
