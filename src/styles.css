@@ -307,5 +307,5 @@
   .customer-desktop-nav { display: none; }
 }
 
-.brand img{display:block;width:142px;height:94px;max-width:35vw;object-fit:contain;object-position:center}
-@media(max-width:480px){.brand img{width:116px;height:77px;max-width:42vw}}
+.brand img{display:block;width:104px;height:69px;max-width:30vw;object-fit:contain;object-position:center}
+@media(max-width:480px){.brand img{width:86px;height:57px;max-width:34vw}}
