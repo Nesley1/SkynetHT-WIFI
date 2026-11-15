@@ -19,11 +19,14 @@ type Plan = {
   download_speed_mbps?: number | null; starts_on_first_login: boolean;
 };
 type Profile = { id: string; full_name: string | null; phone: string | null; role: string; email?: string | null; customer_reference?: string | null; created_at?: string };
+type ManualMethodSettings = { enabled: boolean; phone: string; name: string };
+type PaymentOptions = { manual: { moncash: ManualMethodSettings; natcash: ManualMethodSettings }; tranzak: { enabled: boolean } };
 type Payment = {
   id: string; user_id?: string | null; amount: number; currency: string;
   payment_method: string; customer_phone: string | null; payment_reference: string | null;
   customer_name?: string | null; customer_email?: string | null; customer_reference?: string | null; provider_reference?: string | null;
-  status: string; created_at: string; provider_payload?: { provider?: string } | null; wifi_plans?: { name: string; code: string } | null;
+  proof_path?: string | null; proof_url?: string | null; manual_transaction_id?: string | null;
+  status: string; created_at: string; provider_payload?: { provider?: string; manual_transaction_id?: string } | null; wifi_plans?: { name: string; code: string } | null;
 };
 type WifiTicket = {
   id: string; user_id: string | null; plan_id: string; payment_id: string | null;
@@ -66,7 +69,7 @@ function statusLabel(status: string) {
   return ({ pending: "En attente", confirmed: "Confirmé", rejected: "Refusé", refunded: "Remboursé", created: "Créé", active: "Actif", expired: "Expiré", blocked: "Bloqué", revoked: "Révoqué" } as Record<string, string>)[status] || status;
 }
 function paymentLabel(method: string) {
-  return ({ cash: "Espèces", moncash: "MonCash", natcash: "NatCash", card: "Carte désactivée", bank_transfer: "Virement bancaire", other: "Autre" } as Record<string, string>)[method] || method;
+  return ({ cash: "Espèces", moncash: "MonCash · Tranzak", natcash: "NatCash · Tranzak", manual_moncash: "MonCash · Manuel", manual_natcash: "NatCash · Manuel", card: "Carte désactivée", bank_transfer: "Virement bancaire", other: "Autre" } as Record<string, string>)[method] || method;
 }
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -110,7 +113,16 @@ export default function App() {
   const [signupConfirmationEmail, setSignupConfirmationEmail] = useState("");
   const [resendBusy, setResendBusy] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState("moncash");
+  const [paymentMethod, setPaymentMethod] = useState("tranzak_moncash");
+  const [paymentOptions, setPaymentOptions] = useState<PaymentOptions>({
+    manual: { moncash: { enabled: false, phone: "", name: "" }, natcash: { enabled: false, phone: "", name: "" } },
+    tranzak: { enabled: false },
+  });
+  const [transactionId, setTransactionId] = useState("");
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [manualPaymentSettings, setManualPaymentSettings] = useState<PaymentOptions["manual"]>({
+    moncash: { enabled: false, phone: "", name: "" }, natcash: { enabled: false, phone: "", name: "" },
+  });
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -216,6 +228,13 @@ export default function App() {
     setCatalogLoading(false);
   };
   useEffect(() => { loadPlans(); }, []);
+  useEffect(() => {
+    let alive = true;
+    fetch(`${API_URL}/api/payment-options`).then((response) => response.ok ? response.json() : Promise.reject())
+      .then((options: PaymentOptions) => { if (alive) setPaymentOptions(options); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
 
   const loadMyRecords = async () => {
     if (!session) { setMyPayments([]); setMyTickets([]); return; }
@@ -255,16 +274,18 @@ export default function App() {
     setBusy(true);
     fail("");
     try {
-      const [s, c, p, t, pl, benefits] = await Promise.all([
+      const [s, c, p, t, pl, benefits, manualSettings] = await Promise.all([
         api<Summary>("/api/admin/summary"),
         api<{ customers: Profile[] }>("/api/admin/customers"),
         api<{ payments: Payment[] }>("/api/admin/payments"),
         api<{ tickets: WifiTicket[] }>("/api/admin/tickets"),
         api<{ plans: Plan[] }>("/api/admin/plans"),
         api<{globalDiscount:number;discounts:{user_id:string;percent:number;enabled:boolean}[];notices:{id:string;scope:string;user_id:string|null;reason:string;active:boolean;created_at:string}[]}>("/api/admin/customer-benefits"),
+        api<PaymentOptions["manual"]>("/api/admin/manual-payment-settings"),
       ]);
       setSummary(s); setCustomers(c.customers); setPayments(p.payments); setTickets(t.tickets); setAdminPlans(pl.plans);
       setGlobalDiscount(String(benefits.globalDiscount || 0)); setIndividualDiscounts(benefits.discounts); setServiceNotices(benefits.notices);
+      setManualPaymentSettings(manualSettings);
       setTicketPlanId((current) => current || pl.plans.find((plan) => plan.is_active)?.id || "");
     } catch (e) { fail((e as Error).message); }
     finally { setBusy(false); }
@@ -457,26 +478,53 @@ export default function App() {
     }
     if (!session) { openAuth("customer"); return; }
     setPhone(profile?.phone || "");
-    setPaymentMethod("moncash"); setPaymentOpen(true); setError("");
+    const preferred = paymentOptions.tranzak.enabled ? "tranzak_moncash"
+      : paymentOptions.manual.moncash.enabled ? "manual_moncash"
+      : paymentOptions.manual.natcash.enabled ? "manual_natcash" : "tranzak_moncash";
+    setPaymentMethod(preferred); setTransactionId(""); setReceiptFile(null); setPaymentOpen(true); setError("");
   };
   const submitPayment = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!chosenPlan || !phone.trim()) { fail("Entrez un numéro de téléphone valide."); return; }
+    const manual = paymentMethod.startsWith("manual_");
+    if (manual && (!transactionId.trim() || !receiptFile)) { fail("Ajoutez l’ID de transaction et la photo du reçu."); return; }
+    if (manual && receiptFile && (!["image/jpeg", "image/png", "image/webp"].includes(receiptFile.type) || receiptFile.size > 5 * 1024 * 1024)) {
+      fail("Le reçu doit être une image JPG, PNG ou WebP de 5 Mo maximum."); return;
+    }
     setBusy(true); fail("");
+    let uploadedPath = "";
     try {
+      let proofPath: string | undefined;
+      if (manual && receiptFile && session?.user.id) {
+        const extension = receiptFile.type === "image/png" ? "png" : receiptFile.type === "image/webp" ? "webp" : "jpg";
+        uploadedPath = `${session.user.id}/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage.from("wifi-payment-proofs").upload(uploadedPath, receiptFile, {
+          contentType: receiptFile.type, upsert: false,
+        });
+        if (uploadError) throw uploadError;
+        proofPath = uploadedPath;
+      }
       const result = await api<{ payment: Payment; paymentUrl?: string; provider?: string }>("/api/payments", {
         method: "POST",
-        body: JSON.stringify({ planId: chosenPlan.id, paymentMethod, customerPhone: phone.trim(),  }),
+        body: JSON.stringify({
+          planId: chosenPlan.id, paymentMethod, customerPhone: phone.trim(),
+          ...(manual ? { transactionId: transactionId.trim(), proofPath } : {}),
+        }),
       });
       if (result.paymentUrl && result.provider === "tranzak") {
         window.location.assign(result.paymentUrl);
         return;
       }
       setPaymentOpen(false);
-      notify(`Demande enregistrée. Référence de demande : ${result.payment.id}`);
+      setTransactionId(""); setReceiptFile(null);
+      notify(manual
+        ? "Votre preuve de paiement a été envoyée. Votre demande est en attente de vérification."
+        : `Demande enregistrée. Référence de demande : ${result.payment.id}`);
       await loadMyRecords();
-    } catch (e) { fail((e as Error).message); }
-    finally { setBusy(false); }
+    } catch (e) {
+      if (uploadedPath) await supabase.storage.from("wifi-payment-proofs").remove([uploadedPath]).catch(() => undefined);
+      fail((e as Error).message);
+    } finally { setBusy(false); }
   };
 
   const confirmPayment = async (paymentId: string) => {
@@ -692,7 +740,19 @@ export default function App() {
                 <p className="report-help">Le document imprimable comprend l’identité Skynet Wi-Fi, la date et l’heure de génération, les statistiques financières ainsi que les registres détaillés des paiements, tickets et clients. Pour obtenir le PDF, choisissez « Enregistrer au format PDF » dans la fenêtre d’impression.</p>
               </div>
             </div>}
-            {section==="settings"&&<div className="dashboard-content"><div className="section-intro"><div><h2>Paramètres du système</h2><p>État des services réellement configurés.</p></div></div><div className="settings-grid"><div className="panel setting-card"><div className="setting-icon"><Radio/></div><h3>Routeur MikroTik</h3><p>Le routeur n’a pas encore été acheté ni connecté.</p><span className="offline-label"><span/> {routerStatus}</span></div><div className="panel setting-card"><div className="setting-icon"><Globe2/></div><h3>API Skynet Wi-Fi</h3><p>Service backend hébergé sur Render.</p><span className={apiHealth==="online"?"online-label":"offline-label"}>{apiHealth==="online"?"Disponible":apiHealth==="offline"?"Indisponible":"Vérification"}</span></div><div className="panel setting-card"><div className="setting-icon"><ShieldCheck/></div><h3>Compte administrateur</h3><p>{profile?.email}</p><span className="online-label">Rôle administrateur vérifié côté serveur</span></div></div></div>}
+            {section==="settings"&&<div className="dashboard-content"><div className="section-intro"><div><h2>Paramètres du système</h2><p>État des services réellement configurés.</p></div></div><div className="settings-grid"><div className="panel setting-card"><div className="setting-icon"><Radio/></div><h3>Routeur MikroTik</h3><p>Le routeur n’a pas encore été acheté ni connecté.</p><span className="offline-label"><span/> {routerStatus}</span></div><div className="panel setting-card"><div className="setting-icon"><Globe2/></div><h3>API Skynet Wi-Fi</h3><p>Service backend hébergé sur Render.</p><span className={apiHealth==="online"?"online-label":"offline-label"}>{apiHealth==="online"?"Disponible":apiHealth==="offline"?"Indisponible":"Vérification"}</span></div><div className="panel setting-card"><div className="setting-icon"><ShieldCheck/></div><h3>Compte administrateur</h3><p>{profile?.email}</p><span className="online-label">Rôle administrateur vérifié côté serveur</span></div></div>
+              <div className="section-intro"><div><h2>Numéros de paiement manuel</h2><p>Configurez les comptes qui seront affichés aux clients pour leurs transferts MonCash et NatCash.</p></div></div>
+              <form className="panel create-ticket-form" onSubmit={async e=>{e.preventDefault();setBusy(true);try{await api("/api/admin/manual-payment-settings",{method:"PUT",body:JSON.stringify(manualPaymentSettings)});notify("Paramètres de paiement manuel enregistrés.");const opts=await api<PaymentOptions["manual"]>("/api/admin/manual-payment-settings");setManualPaymentSettings(opts);const pub=await fetch(`${API_URL}/api/payment-options`).then(r=>r.json());setPaymentOptions(pub);}catch(err){fail((err as Error).message);}finally{setBusy(false);}}}>
+                <div><label>MonCash — numéro de réception</label><input value={manualPaymentSettings.moncash.phone} onChange={e=>setManualPaymentSettings(v=>({...v,moncash:{...v.moncash,phone:e.target.value}}))} placeholder="Ex. 3700 0000"/></div>
+                <div><label>MonCash — non moun k ap resevwa</label><input value={manualPaymentSettings.moncash.name} onChange={e=>setManualPaymentSettings(v=>({...v,moncash:{...v.moncash,name:e.target.value}}))} placeholder="Non konplè"/></div>
+                <div><label>NatCash — numéro de réception</label><input value={manualPaymentSettings.natcash.phone} onChange={e=>setManualPaymentSettings(v=>({...v,natcash:{...v.natcash,phone:e.target.value}}))} placeholder="Ex. 3700 0000"/></div>
+                <div><label>NatCash — non moun k ap resevwa</label><input value={manualPaymentSettings.natcash.name} onChange={e=>setManualPaymentSettings(v=>({...v,natcash:{...v.natcash,name:e.target.value}}))} placeholder="Non konplè"/></div>
+                <div><label><input type="checkbox" checked={manualPaymentSettings.moncash.enabled} onChange={e=>setManualPaymentSettings(v=>({...v,moncash:{...v.moncash,enabled:e.target.checked}}))}/> Aktive MonCash manyèl</label></div>
+                <div><label><input type="checkbox" checked={manualPaymentSettings.natcash.enabled} onChange={e=>setManualPaymentSettings(v=>({...v,natcash:{...v.natcash,enabled:e.target.checked}}))}/> Aktive NatCash manyèl</label></div>
+                <button className="button button-primary" disabled={busy}>Enregistrer les numéros</button>
+              </form>
+              <div className="panel setting-card"><h3>Paiement automatique Tranzak</h3><p>Le parcours automatique MonCash/NatCash via Tranzak est conservé. Son activation réelle reste contrôlée séparément côté serveur, sans être activée par cette configuration.</p><span className={paymentOptions.tranzak.enabled?"online-label":"offline-label"}>{paymentOptions.tranzak.enabled?"Tranzak activé":"En attente d’activation"}</span></div>
+            </div>}
           </main>
         </div>
       )}
