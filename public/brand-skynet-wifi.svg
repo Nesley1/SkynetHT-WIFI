@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 230" role="img" aria-labelledby="title">
+<title id="title">Skynet WiFi</title>
+<defs>
+ <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#39d9f0"/><stop offset=".52" stop-color="#1685ef"/><stop offset="1" stop-color="#073b9f"/></linearGradient>
+ <linearGradient id="gold" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#ffd34e"/><stop offset="1" stop-color="#ff8b12"/></linearGradient>
+ <radialGradient id="glow"><stop stop-color="#20b8ff" stop-opacity=".34"/><stop offset="1" stop-color="#0b2b59" stop-opacity="0"/></radialGradient>
+</defs>
+<g transform="translate(8 8)">
+ <circle cx="105" cy="104" r="94" fill="url(#glow)" stroke="#1688f5" stroke-opacity=".55" stroke-width="2"/>
+ <path d="M37 105a68 68 0 0 1 136 0M50 105a55 55 0 0 1 110 0" fill="none" stroke="url(#blue)" stroke-width="9" stroke-linecap="round"/>
+ <path d="M70 105a35 35 0 0 1 70 0" fill="none" stroke="#42e5f0" stroke-width="9" stroke-linecap="round"/>
+ <circle cx="105" cy="126" r="8" fill="#42e5f0"/>
+ <path d="M27 143c28 22 70 32 111 21" fill="none" stroke="url(#gold)" stroke-width="5" stroke-linecap="round"/>
+ <path d="M34 53c18-27 48-43 80-43 23 0 44 8 61 23" fill="none" stroke="#3c9dff" stroke-width="3" opacity=".7"/>
+ <rect x="54" y="154" width="102" height="28" rx="9" fill="#082b58" stroke="#55d7f4" stroke-width="2"/>
+ <path d="M65 154v-9m80 9v-9" stroke="#d8f8ff" stroke-width="4" stroke-linecap="round"/>
+ <g fill="#48e8ff"><circle cx="75" cy="168" r="3"/><circle cx="88" cy="168" r="3"/><circle cx="101" cy="168" r="3"/><circle cx="114" cy="168" r="3"/><circle cx="127" cy="168" r="3"/></g>
+</g>
+<g font-family="Arial,Helvetica,sans-serif" font-weight="800">
+ <text x="220" y="116" font-size="86" letter-spacing="-4" fill="#0b3157">Skynet</text>
+ <text x="501" y="184" font-size="62" letter-spacing="-2" fill="url(#blue)">WiFi</text>
+ <path d="M220 137h270" stroke="url(#blue)" stroke-width="5" stroke-linecap="round"/>
+ <path d="M504 196c54 8 111 7 170-5" stroke="url(#gold)" stroke-width="5" fill="none" stroke-linecap="round"/>
+</g>
+<text x="224" y="166" font-family="Arial,Helvetica,sans-serif" font-size="19" font-weight="700" letter-spacing="2.2" fill="#5c748e">INTERNET • PARTOUT</text>
+</svg>
