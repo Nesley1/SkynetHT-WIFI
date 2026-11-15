@@ -700,3 +700,13 @@
     font-size: 11px;
   }
 }
+
+
+/* Admin payments: keep customer identity and transaction references in distinct columns. */
+.admin-layout .data-table .payment-client-cell b{font-size:11px;color:#28445c;font-weight:800}
+.admin-layout .data-table .payment-client-cell small{max-width:220px}
+.admin-layout .data-table .payment-client-ref{margin-top:7px;padding-top:6px;border-top:1px solid #edf1f5;color:#2676ad;font-weight:800}
+.admin-layout .data-table .payment-reference-cell{min-width:175px;background:#fbfcfe}
+.admin-layout .data-table .payment-reference-cell small{font-size:8px;text-transform:uppercase;letter-spacing:.45px;color:#8998a7;font-weight:800;margin-top:5px}
+.admin-layout .data-table .payment-reference-cell b{font-size:9px;color:#36536c;max-width:190px;overflow-wrap:anywhere;font-weight:700}
+.admin-layout .data-table .payment-reference-cell small:not(:first-child){margin-top:10px}
