@@ -558,7 +558,7 @@ const server = createServer(async (req, res) => {
       if (!user) return;
       const { data, error } = await supabase
         .from("payments")
-        .select("id,user_id,amount,currency,payment_method,customer_phone,payment_reference,status,provider_payload,created_at,wifi_plans(name,code)")
+        .select("id,user_id,amount,currency,payment_method,customer_phone,payment_reference,provider_reference,status,provider_payload,created_at,wifi_plans(name,code)")
         .order("created_at", { ascending: false })
         .limit(100);
       if (error) throw error;
@@ -567,7 +567,7 @@ const server = createServer(async (req, res) => {
       let emailById = new Map();
       if (userIds.length) {
         const [{ data: profileRows, error: profilesError }, { data: authData, error: authError }] = await Promise.all([
-          supabase.from("profiles").select("id,full_name,phone").in("id", userIds),
+          supabase.from("profiles").select("id,full_name,phone,customer_reference").in("id", userIds),
           supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
         ]);
         if (profilesError) throw profilesError;
@@ -579,6 +579,7 @@ const server = createServer(async (req, res) => {
         ...payment,
         customer_name: profileById.get(payment.user_id)?.full_name || null,
         customer_email: emailById.get(payment.user_id) || null,
+        customer_reference: profileById.get(payment.user_id)?.customer_reference || null,
       }));
       send(res, 200, { payments }, origin);
       return;
