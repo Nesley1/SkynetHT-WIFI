@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@500;600;700;800&display=swap");
+
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap');
 
 :root{font-family:'DM Sans',sans-serif;color:#13243a;background:#f6f8fb;font-synthesis:none;text-rendering:optimizeLegibility;font-smooth:always;font-optical-sizing:auto;font-weight:400;--navy:#071a2b;--navy2:#0c2942;--blue:#1677e8;--cyan:#43d4e6;--muted:#718096;--line:#e7edf3;--surface:#fff}
@@ -337,3 +339,116 @@
 .report-date-filters .button{min-height:42px;white-space:nowrap}
 .report-period-preview{font-size:11px;color:#73889a;margin:10px 0 16px}
 @media(max-width:640px){.report-date-filters{display:grid;grid-template-columns:1fr;padding:12px}.report-date-filters>div{min-width:0}.report-date-filters .button{width:100%;justify-content:center}}
+
+
+/* Admin typography system — premium, consistent, and isolated from customer pages */
+.admin-layout,
+.admin-layout button,
+.admin-layout input,
+.admin-layout select,
+.admin-layout textarea {
+  font-family: "Inter", sans-serif;
+}
+.admin-layout h1,
+.admin-layout h2,
+.admin-layout h3,
+.admin-layout h4,
+.admin-layout .admin-header h1,
+.admin-layout .welcome-row h2,
+.admin-layout .section-intro h2,
+.admin-layout .panel-heading h3,
+.admin-layout .setting-card h3,
+.admin-layout .modal-header h2 {
+  font-family: "Manrope", sans-serif;
+  letter-spacing: -0.025em;
+}
+.admin-layout .admin-header h1 {
+  font-size: clamp(23px, 1.8vw, 28px);
+  line-height: 1.2;
+  font-weight: 800;
+}
+.admin-layout .welcome-row h2,
+.admin-layout .section-intro h2 {
+  font-size: 19px;
+  line-height: 1.3;
+  font-weight: 800;
+}
+.admin-layout .panel-heading h3,
+.admin-layout .setting-card h3 {
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 750;
+}
+.admin-layout p,
+.admin-layout .section-description,
+.admin-layout .setting-card p {
+  line-height: 1.6;
+}
+.admin-layout .button {
+  min-height: 40px;
+  padding: 10px 15px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0;
+  transition: background .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.admin-layout .button:active {
+  transform: translateY(1px);
+}
+.admin-layout .button-primary {
+  box-shadow: 0 4px 10px rgba(22, 130, 214, .14);
+}
+.admin-layout .button-outline {
+  border-radius: 10px;
+  font-weight: 650;
+}
+.admin-layout .toolbar .button,
+.admin-layout .section-intro .button,
+.admin-layout .setting-card .button {
+  min-height: 38px;
+  font-size: 12px;
+}
+.admin-layout .data-table th {
+  font-size: 10px;
+  letter-spacing: .055em;
+  font-weight: 750;
+}
+.admin-layout .data-table td {
+  font-size: 12px;
+  line-height: 1.45;
+}
+.admin-layout .data-table td b {
+  font-size: 12px;
+  font-weight: 700;
+}
+.admin-layout .data-table td small {
+  font-size: 10px;
+}
+.admin-layout .field-label,
+.admin-layout label {
+  font-size: 12px;
+  font-weight: 650;
+}
+.admin-layout input,
+.admin-layout select,
+.admin-layout textarea {
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  .admin-layout .admin-header h1 {
+    font-size: 21px;
+  }
+  .admin-layout .welcome-row h2,
+  .admin-layout .section-intro h2 {
+    font-size: 17px;
+  }
+  .admin-layout .button {
+    min-height: 39px;
+    font-size: 12px;
+  }
+  .admin-layout .data-table td {
+    font-size: 11px;
+  }
+}
