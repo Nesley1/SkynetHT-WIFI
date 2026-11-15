@@ -33,6 +33,10 @@ The endpoint remains disabled until all three variables are present. The URL mus
 - `ALLOWED_ORIGIN` (defaults to the production Vercel site)
 - `PORT` (defaults to 10000 on Render)
 
+## Payment launch guard
+
+Checkout, the Tranzak webhook, payment reconciliation, and manual payment confirmation are disabled by default. Set `WIFI_PAYMENTS_ENABLED=true` only after the payment provider has been configured and verified, HotSpot voucher provisioning is implemented, and end-to-end tests confirm that customers receive the service they paid for. Until then, leave it unset or set it to `false`; payment endpoints return `503 WIFI_PAYMENTS_DISABLED`.
+
 ## Current implementation boundary
 
-Payment records can be created as pending, but payment confirmation and ticket issuance must remain manual/disabled until provider verification and router connectivity are implemented and tested. Do not activate real customer access based only on a browser redirect or client-submitted status.
+The API can prepare payment and ticket records, but it does not yet provision HotSpot users on the MikroTik. Router status is read-only. Do not enable paid checkout or promise customer internet access until private router connectivity, voucher creation/activation/expiry, provider verification, and end-to-end tests are complete. Never trust a browser redirect or client-submitted payment status.
