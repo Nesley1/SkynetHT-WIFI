@@ -262,7 +262,7 @@ const server = createServer(async (req, res) => {
       if (!user) return;
       const [paymentResult, ticketResult] = await Promise.all([
         supabase.from("payments")
-          .select("id,amount,currency,payment_method,customer_phone,payment_reference,status,created_at,wifi_plans(name,code)")
+          .select("id,amount,currency,payment_method,customer_phone,payment_reference,status,provider_payload,created_at,wifi_plans(name,code)")
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(50),
@@ -310,7 +310,7 @@ const server = createServer(async (req, res) => {
         }
         const transactionId = typeof body.transactionId === "string" ? body.transactionId.trim() : "";
         const proofPath = typeof body.proofPath === "string" ? body.proofPath : "";
-        if (transactionId.length < 5 || transactionId.length > 100 || !/^[A-Za-z0-9._/-]+$/.test(transactionId)
+        if (transactionId.length < 5 || transactionId.length > 100 || !/^[A-Za-z0-9._-]+$/.test(transactionId)
             || !proofPath.startsWith(user.id + "/") || proofPath.split("/").length !== 2) {
           send(res, 400, { error: "INVALID_MANUAL_PAYMENT_PROOF" }, origin); return;
         }
