@@ -147,6 +147,7 @@ export default function App() {
   const [noticeReason, setNoticeReason] = useState("");
   const [reportStartDate, setReportStartDate] = useState("");
   const [reportEndDate, setReportEndDate] = useState("");
+  const [reportPreviewReady, setReportPreviewReady] = useState(false);
 
   const notify = (message: string) => { setNotice(message); setError(""); };
   const fail = (message: string) => { setError(message); setNotice(""); };
@@ -289,12 +290,39 @@ export default function App() {
     }
     const inReportRange = (value?: string | null) => {
       if (!value) return false;
-      const day = new Date(value).toISOString().slice(0, 10);
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return false;
+      const day = `${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,"0")}-${String(parsed.getDate()).padStart(2,"0")}`;
       return (!reportStartDate || day >= reportStartDate) && (!reportEndDate || day <= reportEndDate);
     };
     const reportPayments = payments.filter(p => inReportRange(p.created_at));
     const reportTickets = tickets.filter(t => inReportRange(t.issued_at || t.created_at));
     const reportCustomers = customers.filter(c => inReportRange(c.created_at));
+    const reportDays: string[] = [];
+    if (reportStartDate && reportEndDate) {
+      const cursor = new Date(reportStartDate + "T12:00:00");
+      const lastDay = new Date(reportEndDate + "T12:00:00");
+      while (cursor <= lastDay && reportDays.length < 366) {
+        reportDays.push(`${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,"0")}-${String(cursor.getDate()).padStart(2,"0")}`);
+        cursor.setDate(cursor.getDate()+1);
+      }
+    }
+    const dailyRows = reportDays.map(day => {
+      const dayPayments = reportPayments.filter(p => {
+        const value = new Date(p.created_at);
+        return !Number.isNaN(value.getTime()) && value.getFullYear()===Number(day.slice(0,4)) && value.getMonth()+1===Number(day.slice(5,7)) && value.getDate()===Number(day.slice(8,10));
+      });
+      const dayTickets = reportTickets.filter(t => {
+        const value = new Date(t.issued_at || t.created_at);
+        return !Number.isNaN(value.getTime()) && value.getFullYear()===Number(day.slice(0,4)) && value.getMonth()+1===Number(day.slice(5,7)) && value.getDate()===Number(day.slice(8,10));
+      });
+      const dayCustomers = reportCustomers.filter(c => {
+        const value = new Date(c.created_at);
+        return !Number.isNaN(value.getTime()) && value.getFullYear()===Number(day.slice(0,4)) && value.getMonth()+1===Number(day.slice(5,7)) && value.getDate()===Number(day.slice(8,10));
+      });
+      const dayRevenue = dayPayments.filter(p=>p.status==="confirmed").reduce((totals,p)=>{totals[p.currency==="USD"?"USD":"HTG"]+=Number(p.amount)||0;return totals;},{HTG:0,USD:0});
+      return `<tr><td>${escapeHtml(new Date(day+"T12:00:00").toLocaleDateString("fr-FR"))}</td><td>${dayPayments.length}</td><td>${dayTickets.length}</td><td>${dayCustomers.length}</td><td>${escapeHtml(money(dayRevenue.HTG,"HTG"))}</td><td>${escapeHtml(money(dayRevenue.USD,"USD"))}</td></tr>`;
+    }).join("");
     const confirmedPayments = reportPayments.filter(p => p.status === "confirmed");
     const reportRevenue = confirmedPayments.reduce((totals, p) => {
       const currency = p.currency === "USD" ? "USD" : "HTG";
@@ -323,12 +351,14 @@ export default function App() {
       <header><img src="${logo}" alt="Logo Skynet Wi-Fi"><div><h1>Rapport de gestion</h1><p><strong>Skynet Wi-Fi</strong> · Gonaïves, Haïti</p><p>Période : ${escapeHtml(periodLabel)}</p><p>Rapport généré le ${escapeHtml(stamp)}</p><p>Document administratif · Données réelles du système</p></div></header>
       <div class="meta"><strong>Administrateur :</strong> ${escapeHtml(profile?.full_name || profile?.email || "Administrateur")} &nbsp; | &nbsp; <strong>Compte :</strong> ${escapeHtml(profile?.email || "—")} &nbsp; | &nbsp; <strong>Routeur :</strong> ${escapeHtml(routerStatus)}</div>
       <div class="stats"><div class="stat"><small>Clients inscrits sur la période</small><b>${reportCustomers.length}</b></div><div class="stat"><small>Tickets émis sur la période</small><b>${reportTickets.length}</b></div><div class="stat"><small>Paiements confirmés (HTG)</small><b>${escapeHtml(money(reportRevenue.HTG,"HTG"))}</b></div><div class="stat"><small>Paiements confirmés (USD)</small><b>${escapeHtml(money(reportRevenue.USD,"USD"))}</b></div></div>
+      ${reportDays.length ? `<section class="section"><h2>Résumé quotidien (${reportDays.length} jours)</h2><div class="table-wrap"><table><thead><tr><th>Date</th><th>Paiements</th><th>Tickets</th><th>Clients</th><th>Revenus HTG</th><th>Revenus USD</th></tr></thead><tbody>${dailyRows}</tbody></table></div></section>` : ""}
       <section class="section"><h2>Historique des paiements (${reportPayments.length})</h2><div class="table-wrap">${reportPayments.length ? `<table><thead><tr><th>Référence</th><th>Client</th><th>Téléphone</th><th>Forfait</th><th>Moyen</th><th>Statut</th><th>Date</th><th>Montant</th></tr></thead><tbody>${paymentRows}</tbody></table>` : '<p class="empty">Aucun paiement enregistré.</p>'}</div></section>
       <section class="section"><h2>Registre des tickets Wi-Fi (${reportTickets.length})</h2><div class="table-wrap">${reportTickets.length ? `<table><thead><tr><th>Code</th><th>Forfait</th><th>Statut</th><th>Créé le</th><th>Expire le</th></tr></thead><tbody>${ticketRows}</tbody></table>` : '<p class="empty">Aucun ticket enregistré.</p>'}</div></section>
       <section class="section"><h2>Registre des clients (${reportCustomers.length})</h2><div class="table-wrap">${reportCustomers.length ? `<table><thead><tr><th>Nom</th><th>Téléphone</th><th>E-mail</th><th>Inscription</th></tr></thead><tbody>${customerRows}</tbody></table>` : '<p class="empty">Aucun client enregistré.</p>'}</div></section>
       <footer><span>Skynet Wi-Fi · Gonaïves, Haïti</span><span>Généré le ${escapeHtml(stamp)} · Document confidentiel</span></footer>
     </body></html>`);
     popup.document.close();
+    setReportPreviewReady(true);
     if (printNow) popup.onload = () => { popup.focus(); popup.print(); };
   };
   const canOpenAdminDashboard = profile?.role === "admin" && profile.email?.trim().toLowerCase() === "nesleyestime1@gmail.com";
@@ -656,7 +686,7 @@ export default function App() {
                 <div className="report-preview-stats">
                   <div><small>Clients</small><b>{customers.length}</b></div><div><small>Paiements</small><b>{payments.length}</b></div><div><small>Tickets</small><b>{tickets.length}</b></div><div><small>Revenus HTG</small><b>{money(summary?.revenue?.HTG??0,"HTG")}</b></div><div><small>Revenus USD</small><b>{money(summary?.revenue?.USD??0,"USD")}</b></div>
                 </div>
-                <div className="report-actions"><button className="button button-primary" onClick={()=>openReport(true)}><FileDown size={16}/> Télécharger PDF</button><button className="button button-outline" onClick={()=>openReport(true)}><Printer size={16}/> Imprimer</button></div>
+                <div className="report-actions"><button className="button button-primary" onClick={()=>openReport(false)}><FileText size={16}/> Générer l’aperçu</button><button className="button button-outline" disabled={!reportPreviewReady} onClick={()=>openReport(true)}><Printer size={16}/> Imprimer / PDF</button></div>
                 <p className="report-help">Le document imprimable comprend l’identité Skynet Wi-Fi, la date et l’heure de génération, les statistiques financières ainsi que les registres détaillés des paiements, tickets et clients. Pour obtenir le PDF, choisissez « Enregistrer au format PDF » dans la fenêtre d’impression.</p>
               </div>
             </div>}
