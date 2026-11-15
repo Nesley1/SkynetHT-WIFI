@@ -307,6 +307,19 @@ export default function App() {
         cursor.setDate(cursor.getDate()+1);
       }
     }
+
+    const confirmedPayments = reportPayments.filter(p => p.status === "confirmed");
+    const reportRevenue = confirmedPayments.reduce((totals, p) => {
+      const currency = p.currency === "USD" ? "USD" : "HTG";
+      totals[currency] += Number(p.amount) || 0;
+      return totals;
+    }, { HTG: 0, USD: 0 });
+    const periodLabel = reportStartDate || reportEndDate
+      ? `${reportStartDate ? new Date(reportStartDate+"T00:00:00").toLocaleDateString("fr-FR") : "Début non défini"} au ${reportEndDate ? new Date(reportEndDate+"T00:00:00").toLocaleDateString("fr-FR") : "Aujourd’hui"}`
+      : "Toutes les dates";
+    const generatedAt = new Date();
+    const stamp = new Intl.DateTimeFormat("fr-FR", { dateStyle: "full", timeStyle: "short" }).format(generatedAt);
+    const escapeHtml = (value: unknown) => String(value ?? "—").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char] || char));
     const dailyRows = reportDays.map(day => {
       const dayPayments = reportPayments.filter(p => {
         const value = new Date(p.created_at);
@@ -323,18 +336,6 @@ export default function App() {
       const dayRevenue = dayPayments.filter(p=>p.status==="confirmed").reduce((totals,p)=>{totals[p.currency==="USD"?"USD":"HTG"]+=Number(p.amount)||0;return totals;},{HTG:0,USD:0});
       return `<tr><td>${escapeHtml(new Date(day+"T12:00:00").toLocaleDateString("fr-FR"))}</td><td>${dayPayments.length}</td><td>${dayTickets.length}</td><td>${dayCustomers.length}</td><td>${escapeHtml(money(dayRevenue.HTG,"HTG"))}</td><td>${escapeHtml(money(dayRevenue.USD,"USD"))}</td></tr>`;
     }).join("");
-    const confirmedPayments = reportPayments.filter(p => p.status === "confirmed");
-    const reportRevenue = confirmedPayments.reduce((totals, p) => {
-      const currency = p.currency === "USD" ? "USD" : "HTG";
-      totals[currency] += Number(p.amount) || 0;
-      return totals;
-    }, { HTG: 0, USD: 0 });
-    const periodLabel = reportStartDate || reportEndDate
-      ? `${reportStartDate ? new Date(reportStartDate+"T00:00:00").toLocaleDateString("fr-FR") : "Début non défini"} au ${reportEndDate ? new Date(reportEndDate+"T00:00:00").toLocaleDateString("fr-FR") : "Aujourd’hui"}`
-      : "Toutes les dates";
-    const generatedAt = new Date();
-    const stamp = new Intl.DateTimeFormat("fr-FR", { dateStyle: "full", timeStyle: "short" }).format(generatedAt);
-    const escapeHtml = (value: unknown) => String(value ?? "—").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char] || char));
     const paymentRows = reportPayments.map((p) => `<tr><td>${escapeHtml(p.payment_reference || p.id)}</td><td>${escapeHtml(p.customer_name || "Client")}</td><td>${escapeHtml(p.customer_phone || "—")}</td><td>${escapeHtml(p.wifi_plans?.name || "—")}</td><td>${escapeHtml(paymentLabel(p.payment_method))}</td><td>${escapeHtml(statusLabel(p.status))}</td><td>${escapeHtml(date(p.created_at))}</td><td>${escapeHtml(money(Number(p.amount), p.currency))}</td></tr>`).join("");
     const ticketRows = reportTickets.map((t) => `<tr><td>${escapeHtml(t.router_username || "—")}</td><td>${escapeHtml(t.wifi_plans?.name || "—")}</td><td>${escapeHtml(statusLabel(t.status))}</td><td>${escapeHtml(date(t.issued_at || t.created_at))}</td><td>${escapeHtml(date(t.expires_at))}</td></tr>`).join("");
     const customerRows = reportCustomers.map((c) => `<tr><td>${escapeHtml(c.full_name || "Sans nom")}</td><td>${escapeHtml(c.phone || "—")}</td><td>${escapeHtml(c.email || "—")}</td><td>${escapeHtml(date(c.created_at))}</td></tr>`).join("");
@@ -678,9 +679,9 @@ export default function App() {
               <div className="panel report-center">
                 <div className="report-preview-brand"><div className="report-logo"><Brand/></div><div><h3>Rapport général Skynet Wi-Fi</h3><p>Gonaïves, Haïti · Données actualisées depuis le système</p><small>Génération : {new Date().toLocaleDateString("fr-FR")} à {new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</small></div></div>
                 <div className="report-date-filters">
-                  <div><label htmlFor="report-start-date">Date début</label><input id="report-start-date" type="date" value={reportStartDate} onChange={e=>setReportStartDate(e.target.value)}/></div>
-                  <div><label htmlFor="report-end-date">Date fin</label><input id="report-end-date" type="date" value={reportEndDate} onChange={e=>setReportEndDate(e.target.value)}/></div>
-                  <button className="button button-outline" type="button" onClick={()=>{setReportStartDate("");setReportEndDate("");}}>Toutes les dates</button>
+                  <div><label htmlFor="report-start-date">Date début</label><input id="report-start-date" type="date" value={reportStartDate} onChange={e=>{setReportStartDate(e.target.value);setReportPreviewReady(false);}}/></div>
+                  <div><label htmlFor="report-end-date">Date fin</label><input id="report-end-date" type="date" value={reportEndDate} onChange={e=>{setReportEndDate(e.target.value);setReportPreviewReady(false);}}/></div>
+                  <button className="button button-outline" type="button" onClick={()=>{setReportStartDate("");setReportEndDate("");setReportPreviewReady(false);}}>Toutes les dates</button>
                 </div>
                 <p className="report-period-preview">Période sélectionnée : <strong>{reportStartDate?new Date(reportStartDate+"T00:00:00").toLocaleDateString("fr-FR"):"Depuis le début"}</strong> — <strong>{reportEndDate?new Date(reportEndDate+"T00:00:00").toLocaleDateString("fr-FR"):"Jusqu’à aujourd’hui"}</strong></p>
                 <div className="report-preview-stats">
