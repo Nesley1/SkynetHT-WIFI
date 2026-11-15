@@ -86,7 +86,7 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 function Brand() {
-  return <div className="brand"><div className="brand-mark"><Wifi size={21} strokeWidth={2.7} /></div><div><strong>skynet<span> wi-fi</span></strong><small>INTERNET • PARTOUT</small></div></div>;
+  return <div className="brand"><img src="/brand-skynet-wifi.svg" alt="Skynet WiFi" /></div>;
 }
 
 export default function App() {
