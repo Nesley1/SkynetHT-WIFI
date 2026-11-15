@@ -7,6 +7,8 @@ const PORT = Number(process.env.PORT || 10000);
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "https://skynetht-wifi.vercel.app";
+// Checkout and payment confirmation stay disabled until the hotspot is fully verified.
+const WIFI_PAYMENTS_ENABLED = process.env.WIFI_PAYMENTS_ENABLED === "true";
 const TRANZAK_API_URL = "https://api.tranzak.co/api/gateway/v1";
 
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
@@ -145,6 +147,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "POST" && url.pathname === "/webhooks/tranzak") {
+      if (!WIFI_PAYMENTS_ENABLED) { send(res, 503, { error: "WIFI_PAYMENTS_DISABLED" }); return; }
       const secret = process.env.TRANZAK_WEBHOOK_SECRET;
       if (!secret) { send(res, 503, { error: "TRANZAK_WEBHOOK_NOT_CONFIGURED" }); return; }
       const raw = await readRawBody(req);
@@ -246,6 +249,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/payments") {
+      if (!WIFI_PAYMENTS_ENABLED) { send(res, 503, { error: "WIFI_PAYMENTS_DISABLED" }, origin); return; }
       const user = await requireUser(req, res, origin);
       if (!user) return;
       const body = await readBody(req);
@@ -370,6 +374,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/payments/reconcile") {
+      if (!WIFI_PAYMENTS_ENABLED) { send(res, 503, { error: "WIFI_PAYMENTS_DISABLED" }, origin); return; }
       const user = await requireUser(req, res, origin);
       if (!user) return;
       if (!process.env.TRANZAK_API_KEY) { send(res, 503, { error: "TRANZAK_NOT_CONFIGURED" }, origin); return; }
@@ -667,6 +672,7 @@ const server = createServer(async (req, res) => {
       ? [null, confirmPaymentId]
       : null;
     if (confirmPaymentMatch) {
+      if (!WIFI_PAYMENTS_ENABLED) { send(res, 503, { error: "WIFI_PAYMENTS_DISABLED" }, origin); return; }
       const user = await requireUser(req, res, origin, true);
       if (!user) return;
 
