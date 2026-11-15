@@ -328,3 +328,12 @@
 .report-actions .button{display:inline-flex;align-items:center;gap:8px}
 .report-help{font-size:10px;color:#8796a4;line-height:1.7;margin:17px 0 0;max-width:760px}
 @media(max-width:760px){.report-center{padding:16px}.report-preview-brand{align-items:flex-start;gap:10px}.report-logo{width:76px;height:60px}.report-logo .brand img{width:74px;height:58px}.report-preview-brand h3{font-size:14px}.report-preview-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.report-preview-stats>div{padding:11px}.report-preview-stats b{font-size:12px}.report-actions{display:grid;grid-template-columns:1fr}.report-actions .button{justify-content:center;width:100%}}
+
+
+.report-date-filters{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin:22px 0 8px;padding:16px;border:1px solid #e3ebf2;border-radius:10px;background:#f8fbfd}
+.report-date-filters>div{display:flex;flex-direction:column;gap:7px;min-width:180px;flex:1}
+.report-date-filters label{font-size:11px;font-weight:700;color:#526c81}
+.report-date-filters input{width:100%;min-height:42px;border:1px solid #d8e3ec;border-radius:7px;padding:8px 10px;background:#fff;color:#243e54;font:inherit}
+.report-date-filters .button{min-height:42px;white-space:nowrap}
+.report-period-preview{font-size:11px;color:#73889a;margin:10px 0 16px}
+@media(max-width:640px){.report-date-filters{display:grid;grid-template-columns:1fr;padding:12px}.report-date-filters>div{min-width:0}.report-date-filters .button{width:100%;justify-content:center}}
