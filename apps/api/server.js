@@ -7,7 +7,7 @@ const PORT = Number(process.env.PORT || 10000);
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "https://skynetht-wifi.vercel.app";
-// Checkout and payment confirmation stay disabled until the hotspot is fully verified.
+// Automatic Tranzak checkout, webhooks, and reconciliation stay gated until the hotspot is verified.
 const WIFI_PAYMENTS_ENABLED = process.env.WIFI_PAYMENTS_ENABLED === "true";
 const TRANZAK_API_URL = "https://api.tranzak.co/api/gateway/v1";
 
