@@ -293,7 +293,7 @@ const server = createServer(async (req, res) => {
         currency: plan.currency,
         payment_method: body.paymentMethod,
         customer_phone: body.customerPhone.trim(),
-        payment_reference: useTranzak ? null : (typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0, 120) : null),
+        payment_reference: `SKY-${randomBytes(5).toString("hex").toUpperCase()}`,
         provider_payload: useTranzak ? { provider: "tranzak", state: "creating" } : {},
         status: "pending",
       }).select("id,amount,currency,payment_method,status,created_at").single();
@@ -540,11 +540,29 @@ const server = createServer(async (req, res) => {
       if (!user) return;
       const { data, error } = await supabase
         .from("payments")
-        .select("id,amount,currency,payment_method,customer_phone,payment_reference,status,provider_payload,created_at, wifi_plans(name,code)")
+        .select("id,user_id,amount,currency,payment_method,customer_phone,payment_reference,status,provider_payload,created_at,wifi_plans(name,code)")
         .order("created_at", { ascending: false })
         .limit(100);
       if (error) throw error;
-      send(res, 200, { payments: data || [] }, origin);
+      const userIds = [...new Set((data || []).map((payment) => payment.user_id).filter(Boolean))];
+      let profileById = new Map();
+      let emailById = new Map();
+      if (userIds.length) {
+        const [{ data: profileRows, error: profilesError }, { data: authData, error: authError }] = await Promise.all([
+          supabase.from("profiles").select("id,full_name,phone").in("id", userIds),
+          supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+        ]);
+        if (profilesError) throw profilesError;
+        if (authError) throw authError;
+        profileById = new Map((profileRows || []).map((profile) => [profile.id, profile]));
+        emailById = new Map((authData.users || []).map((authUser) => [authUser.id, authUser.email || null]));
+      }
+      const payments = (data || []).map((payment) => ({
+        ...payment,
+        customer_name: profileById.get(payment.user_id)?.full_name || null,
+        customer_email: emailById.get(payment.user_id) || null,
+      }));
+      send(res, 200, { payments }, origin);
       return;
     }
 
