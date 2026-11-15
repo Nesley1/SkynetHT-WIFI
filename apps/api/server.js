@@ -220,14 +220,14 @@ const server = createServer(async (req, res) => {
       if (Object.hasOwn(body, "fullName")) { if (typeof body.fullName !== "string" || body.fullName.trim().length < 2 || body.fullName.trim().length > 100) { send(res, 400, { error: "INVALID_FULL_NAME" }, origin); return; } updates.full_name = body.fullName.trim(); }
       if (Object.hasOwn(body, "phone")) { if (typeof body.phone !== "string" || body.phone.trim().length < 7 || body.phone.trim().length > 30) { send(res, 400, { error: "INVALID_PHONE" }, origin); return; } updates.phone = body.phone.trim(); }
       if (!Object.keys(updates).length) { send(res, 400, { error: "NO_PROFILE_CHANGES" }, origin); return; }
-      const { data, error } = await supabase.from("profiles").update(updates).eq("id", user.id).select("id,full_name,phone,role,created_at").single();
+      const { data, error } = await supabase.from("profiles").update(updates).eq("id", user.id).select("id,full_name,phone,role,customer_reference,created_at").single();
       if (error) throw error; send(res, 200, { profile: { ...data, email: user.email } }, origin); return;
     }
     if (req.method === "GET" && url.pathname === "/api/me") {
       const user = await requireUser(req, res, origin);
       if (!user) return;
       const { data: profile, error } = await supabase
-        .from("profiles").select("id,full_name,phone,role,created_at").eq("id", user.id).maybeSingle();
+        .from("profiles").select("id,full_name,phone,role,customer_reference,created_at").eq("id", user.id).maybeSingle();
       if (error) throw error;
       const [d, g, n] = await Promise.all([
         supabase.from("customer_discounts").select("percent,enabled").eq("user_id", user.id).maybeSingle(),
@@ -445,7 +445,7 @@ const server = createServer(async (req, res) => {
       const user = await requireUser(req, res, origin, true);
       if (!user) return;
       const [{ data: profiles, error }, { data: authData, error: authError }] = await Promise.all([
-        supabase.from("profiles").select("id,full_name,phone,role,created_at").eq("role", "customer").order("created_at", { ascending: false }).limit(200),
+        supabase.from("profiles").select("id,full_name,phone,role,customer_reference,created_at").eq("role", "customer").order("created_at", { ascending: false }).limit(200),
         supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
       ]);
       if (error) throw error;
