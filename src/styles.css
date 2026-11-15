@@ -550,3 +550,153 @@
   .admin-layout .button,
   .admin-layout button.button { font-size: 12px !important; min-height: 40px; }
 }
+
+
+/* Customer portal typography — matching the refined admin visual system */
+.customer-page {
+  font-family: "DM Sans", sans-serif;
+  color: #203b52;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.customer-page :is(h1,h2,h3,h4,.plan-duration,.step b,.customer-view-heading) {
+  font-family: "Manrope", sans-serif;
+  letter-spacing: -.03em;
+}
+.customer-page .hero h1 {
+  font-size: clamp(34px, 4.2vw, 52px);
+  line-height: 1.12;
+  font-weight: 800;
+  letter-spacing: -.045em;
+}
+.customer-page .hero-copy > p {
+  font-size: 15px;
+  line-height: 1.75;
+  font-weight: 450;
+}
+.customer-page .eyebrow,
+.customer-page .hero-trust,
+.customer-page .date-label {
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .075em;
+}
+.customer-page .section-heading h2,
+.customer-page .customer-view-heading,
+.customer-page .panel-heading h2,
+.customer-page .panel-heading h3 {
+  font-family: "Manrope", sans-serif;
+  font-size: clamp(20px, 2vw, 25px);
+  line-height: 1.3;
+  font-weight: 800;
+  letter-spacing: -.035em;
+  color: #17364f;
+}
+.customer-page .section-heading p,
+.customer-page .panel-heading p,
+.customer-page .field-help,
+.customer-page .no-price-note {
+  font-size: 13px;
+  line-height: 1.65;
+}
+.customer-page .plan-card,
+.customer-page .panel,
+.customer-page .step,
+.customer-page .my-record-row {
+  font-family: "DM Sans", sans-serif;
+}
+.customer-page .plan-card h3,
+.customer-page .plan-card .plan-name {
+  font-family: "Manrope", sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+}
+.customer-page .plan-duration {
+  font-size: 23px;
+  line-height: 1.2;
+  font-weight: 800;
+}
+.customer-page .plan-select,
+.customer-page .button,
+.customer-page button.button,
+.customer-page .customer-back-button,
+.customer-page .customer-account-actions button {
+  font-family: "DM Sans", sans-serif;
+  font-size: 13px;
+  line-height: 1.25;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+.customer-page .button,
+.customer-page button.button,
+.customer-page .plan-select {
+  min-height: 43px;
+  border-radius: 11px;
+  padding: 11px 16px;
+}
+.customer-page .step b {
+  font-size: 15px;
+  font-weight: 800;
+}
+.customer-page .step p {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.customer-page :is(input,select,textarea) {
+  font-family: "DM Sans", sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.customer-page :is(label,.field-label) {
+  font-size: 12px;
+  font-weight: 700;
+}
+.customer-page .data-table th {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .035em;
+}
+.customer-page .data-table td {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.topbar .customer-desktop-nav button,
+.topbar .customer-profile-button,
+.topbar .customer-menu-button,
+.topbar .mode-switch {
+  font-family: "DM Sans", sans-serif;
+  font-size: 12px;
+  font-weight: 750;
+}
+.topbar .customer-desktop-nav button {
+  letter-spacing: .005em;
+}
+@media (max-width: 760px) {
+  .customer-page .hero h1 {
+    font-size: clamp(31px, 8vw, 39px);
+    line-height: 1.14;
+  }
+  .customer-page .hero-copy > p {
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .customer-page .section-heading h2,
+  .customer-page .customer-view-heading,
+  .customer-page .panel-heading h2,
+  .customer-page .panel-heading h3 {
+    font-size: 19px;
+  }
+  .customer-page .plan-duration {
+    font-size: 21px;
+  }
+  .customer-page .button,
+  .customer-page button.button,
+  .customer-page .plan-select {
+    min-height: 41px;
+    font-size: 12px;
+  }
+  .customer-page .data-table td {
+    font-size: 11px;
+  }
+}
