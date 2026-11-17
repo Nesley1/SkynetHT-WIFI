@@ -128,6 +128,17 @@ async function requireUser(req, res, origin, admin = false) {
   return user;
 }
 
+async function recordAdminAction(user, action, entityType, entityId = null, details = {}) {
+  const { error } = await supabase.from("admin_audit_logs").insert({
+    actor_id: user.id,
+    action,
+    entity_type: entityType,
+    entity_id: entityId == null ? null : String(entityId),
+    details,
+  });
+  if (error) throw error;
+}
+
 async function finalizeTranzakPayment(payment, providerPayment) {
   const transactionId = String(providerPayment?.transaction_id || "");
   const reference = String(providerPayment?.reference || "");
@@ -594,6 +605,10 @@ const server = createServer(async (req, res) => {
         updated_by: user.id, updated_at: new Date().toISOString(),
       }, { onConflict: "key" });
       if (error) throw error;
+      await recordAdminAction(user, "manual_payment_settings_updated", "system_setting", "manual_payment_methods", {
+        moncash: { enabled: moncash.enabled, phoneLast4: moncash.phone.slice(-4) },
+        natcash: { enabled: natcash.enabled, phoneLast4: natcash.phone.slice(-4) },
+      });
       send(res, 200, { moncash, natcash }, origin); return;
     }
 
@@ -606,23 +621,27 @@ const server = createServer(async (req, res) => {
     if (req.method === "PUT" && url.pathname === "/api/admin/customer-benefits/global-discount") {
       const user = await requireUser(req,res,origin,true); if (!user) return; const body=await readBody(req); const percent=Number(body.percent||0);
       if (!Number.isFinite(percent)||percent<0||percent>=100) { send(res,400,{error:"INVALID_DISCOUNT"},origin); return; }
-      const {error}=await supabase.from("system_settings").upsert({key:"global_customer_discount",value:{percent},updated_by:user.id,updated_at:new Date().toISOString()},{onConflict:"key"}); if(error) throw error; send(res,200,{percent},origin); return;
+      const {error}=await supabase.from("system_settings").upsert({key:"global_customer_discount",value:{percent},updated_by:user.id,updated_at:new Date().toISOString()},{onConflict:"key"}); if(error) throw error;
+       await recordAdminAction(user, "global_discount_updated", "system_setting", "global_customer_discount", { percent }); send(res,200,{percent},origin); return;
     }
     if (req.method === "PUT" && url.pathname === "/api/admin/customer-benefits/individual-discount") {
       const user=await requireUser(req,res,origin,true); if(!user)return; const body=await readBody(req); const percent=Number(body.percent);
       if(!/^[0-9a-f-]{36}$/i.test(body.userId||"")||!Number.isFinite(percent)||percent<0||percent>100){send(res,400,{error:"INVALID_INDIVIDUAL_DISCOUNT"},origin);return;}
       const result=percent===0?await supabase.from("customer_discounts").delete().eq("user_id",body.userId):await supabase.from("customer_discounts").upsert({user_id:body.userId,percent,enabled:true,updated_by:user.id,updated_at:new Date().toISOString()},{onConflict:"user_id"});
-      if(result.error)throw result.error; send(res,200,{userId:body.userId,percent},origin); return;
+      if(result.error)throw result.error;
+       await recordAdminAction(user, percent===0?"individual_discount_removed":"individual_discount_updated", "customer_discount", body.userId, { percent }); send(res,200,{userId:body.userId,percent},origin); return;
     }
     if (req.method === "POST" && url.pathname === "/api/admin/service-notices") {
       const user=await requireUser(req,res,origin,true); if(!user)return; const body=await readBody(req);
       if(!["global","individual"].includes(body.scope)||typeof body.reason!=="string"||body.reason.trim().length<3||body.reason.trim().length>1000||(body.scope==="individual"&&!/^[0-9a-f-]{36}$/i.test(body.userId||""))){send(res,400,{error:"INVALID_SERVICE_NOTICE"},origin);return;}
-      const {data,error}=await supabase.from("service_notices").insert({scope:body.scope,user_id:body.scope==="individual"?body.userId:null,reason:body.reason.trim(),created_by:user.id}).select("id,scope,user_id,reason,active,created_at").single(); if(error)throw error; send(res,201,{notice:data},origin); return;
+      const {data,error}=await supabase.from("service_notices").insert({scope:body.scope,user_id:body.scope==="individual"?body.userId:null,reason:body.reason.trim(),created_by:user.id}).select("id,scope,user_id,reason,active,created_at").single(); if(error)throw error;
+       await recordAdminAction(user, "service_notice_created", "service_notice", data.id, { scope: data.scope, userId: data.user_id }); send(res,201,{notice:data},origin); return;
     }
     if (req.method === "PATCH" && url.pathname.startsWith("/api/admin/service-notices/")) {
       const user=await requireUser(req,res,origin,true); if(!user)return; const id=url.pathname.slice("/api/admin/service-notices/".length); const body=await readBody(req);
       if(!/^[0-9a-f-]{36}$/i.test(id)||typeof body.active!=="boolean"){send(res,400,{error:"INVALID_NOTICE_UPDATE"},origin);return;}
-      const {data,error}=await supabase.from("service_notices").update({active:body.active}).eq("id",id).select("id,active").single(); if(error)throw error; send(res,200,{notice:data},origin); return;
+      const {data,error}=await supabase.from("service_notices").update({active:body.active}).eq("id",id).select("id,active").single(); if(error)throw error;
+       await recordAdminAction(user, body.active?"service_notice_activated":"service_notice_deactivated", "service_notice", data.id, { active: data.active }); send(res,200,{notice:data},origin); return;
     }
     if (req.method === "GET" && url.pathname === "/api/admin/customers") {
       const user = await requireUser(req, res, origin, true);
@@ -696,13 +715,7 @@ const server = createServer(async (req, res) => {
         .select("id,code,name,duration_seconds,price,currency,is_active,display_order,upload_speed_mbps,download_speed_mbps,starts_on_first_login")
         .single();
       if (error) throw error;
-      await supabase.from("admin_audit_logs").insert({
-        actor_id: user.id,
-        action: "wifi_plan_updated",
-        entity_type: "wifi_plan",
-        entity_id: data.id,
-        details: updates,
-      });
+      await recordAdminAction(user, "wifi_plan_updated", "wifi_plan", data.id, updates);
       send(res, 200, { plan: data }, origin);
       return;
     }
@@ -858,13 +871,7 @@ const server = createServer(async (req, res) => {
         send(res, 404, { error: "TICKET_NOT_FOUND" }, origin);
         return;
       }
-      await supabase.from("admin_audit_logs").insert({
-        actor_id: user.id,
-        action: "wifi_ticket_status_changed",
-        entity_type: "wifi_ticket",
-        entity_id: ticket.id,
-        details: { status: body.status },
-      });
+      await recordAdminAction(user, "wifi_ticket_status_changed", "wifi_ticket", ticket.id, { status: body.status });
       send(res, 200, { ticket }, origin);
       return;
     }
