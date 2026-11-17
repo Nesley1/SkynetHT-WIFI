@@ -217,6 +217,12 @@ const server = createServer(async (req, res) => {
         res.writeHead(429, {
           "Content-Type": "application/json; charset=utf-8",
           "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "X-Frame-Options": "DENY",
+          "Referrer-Policy": "no-referrer",
+          "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+          "Strict-Transport-Security": "max-age=31536000",
+          "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
           "Retry-After": String(rate.retryAfter),
           ...(origin ? { "Access-Control-Allow-Origin": origin, "Vary": "Origin" } : {}),
         });
