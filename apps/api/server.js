@@ -17,10 +17,51 @@ const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
     })
   : null;
 
+const rateLimitBuckets = new Map();
+let rateLimitChecks = 0;
+
+function getClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  const chain = Array.isArray(forwarded) ? forwarded.join(",") : String(forwarded || "");
+  // The hosting proxy appends the client address; use the final hop, not a client-supplied first value.
+  return chain.split(",").map((part) => part.trim()).filter(Boolean).at(-1)
+    || req.socket.remoteAddress
+    || "unknown";
+}
+
+function checkRateLimit(req, bucket, limit, windowMs) {
+  const now = Date.now();
+  const key = bucket + ":" + getClientIp(req);
+  let state = rateLimitBuckets.get(key);
+  if (!state || now >= state.resetAt) {
+    state = { count: 0, resetAt: now + windowMs };
+    rateLimitBuckets.set(key, state);
+  }
+  state.count += 1;
+
+  rateLimitChecks += 1;
+  if (rateLimitChecks % 256 === 0 || rateLimitBuckets.size > 10000) {
+    for (const [entryKey, entry] of rateLimitBuckets) {
+      if (now >= entry.resetAt) rateLimitBuckets.delete(entryKey);
+    }
+  }
+
+  return {
+    allowed: state.count <= limit,
+    retryAfter: Math.max(1, Math.ceil((state.resetAt - now) / 1000)),
+  };
+}
+
 function send(res, status, data, origin) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Strict-Transport-Security": "max-age=31536000",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
     ...(origin ? { "Access-Control-Allow-Origin": origin, "Vary": "Origin" } : {}),
   });
   res.end(JSON.stringify(data));
@@ -142,6 +183,12 @@ const server = createServer(async (req, res) => {
       "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type,Authorization",
       "Access-Control-Max-Age": "86400",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "no-referrer",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+      "Strict-Transport-Security": "max-age=31536000",
+      "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
       Vary: "Origin",
     });
     res.end();
@@ -150,6 +197,39 @@ const server = createServer(async (req, res) => {
 
   try {
     const url = new URL(req.url || "/", "http://localhost");
+    if (url.pathname !== "/health") {
+      let bucket = "api";
+      let limit = 300;
+      let windowMs = 15 * 60 * 1000;
+      if (url.pathname === "/webhooks/tranzak") {
+        bucket = "tranzak-webhook";
+        limit = 120;
+        windowMs = 60 * 1000;
+      } else if (url.pathname === "/api/payments" || url.pathname === "/api/payments/reconcile") {
+        bucket = "payment";
+        limit = 12;
+      } else if (url.pathname.startsWith("/api/admin/")) {
+        bucket = "admin";
+        limit = 180;
+      }
+      const rate = checkRateLimit(req, bucket, limit, windowMs);
+      if (!rate.allowed) {
+        res.writeHead(429, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "X-Frame-Options": "DENY",
+          "Referrer-Policy": "no-referrer",
+          "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+          "Strict-Transport-Security": "max-age=31536000",
+          "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+          "Retry-After": String(rate.retryAfter),
+          ...(origin ? { "Access-Control-Allow-Origin": origin, "Vary": "Origin" } : {}),
+        });
+        res.end(JSON.stringify({ error: "RATE_LIMITED", retryAfter: rate.retryAfter }));
+        return;
+      }
+    }
     if (req.method === "GET" && url.pathname === "/health") {
       send(res, 200, {
         status: "ok",
