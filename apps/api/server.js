@@ -715,13 +715,7 @@ const server = createServer(async (req, res) => {
         .select("id,code,name,duration_seconds,price,currency,is_active,display_order,upload_speed_mbps,download_speed_mbps,starts_on_first_login")
         .single();
       if (error) throw error;
-      await supabase.from("admin_audit_logs").insert({
-        actor_id: user.id,
-        action: "wifi_plan_updated",
-        entity_type: "wifi_plan",
-        entity_id: data.id,
-        details: updates,
-      });
+      await recordAdminAction(user, "wifi_plan_updated", "wifi_plan", data.id, updates);
       send(res, 200, { plan: data }, origin);
       return;
     }
@@ -877,13 +871,7 @@ const server = createServer(async (req, res) => {
         send(res, 404, { error: "TICKET_NOT_FOUND" }, origin);
         return;
       }
-      await supabase.from("admin_audit_logs").insert({
-        actor_id: user.id,
-        action: "wifi_ticket_status_changed",
-        entity_type: "wifi_ticket",
-        entity_id: ticket.id,
-        details: { status: body.status },
-      });
+      await recordAdminAction(user, "wifi_ticket_status_changed", "wifi_ticket", ticket.id, { status: body.status });
       send(res, 200, { ticket }, origin);
       return;
     }
