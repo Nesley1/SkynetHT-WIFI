@@ -17,8 +17,6 @@ const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
     })
   : null;
 
-const rateLimitBuckets = new Map();
-let rateLimitChecks = 0;
 
 function getClientIp(req) {
   const forwarded = req.headers["x-forwarded-for"];
@@ -29,27 +27,30 @@ function getClientIp(req) {
     || "unknown";
 }
 
-function checkRateLimit(req, bucket, limit, windowMs) {
-  const now = Date.now();
-  const key = bucket + ":" + getClientIp(req);
-  let state = rateLimitBuckets.get(key);
-  if (!state || now >= state.resetAt) {
-    state = { count: 0, resetAt: now + windowMs };
-    rateLimitBuckets.set(key, state);
-  }
-  state.count += 1;
-
-  rateLimitChecks += 1;
-  if (rateLimitChecks % 256 === 0 || rateLimitBuckets.size > 10000) {
-    for (const [entryKey, entry] of rateLimitBuckets) {
-      if (now >= entry.resetAt) rateLimitBuckets.delete(entryKey);
+async function checkRateLimit(req, bucket, limit, windowMs) {
+  if (!supabase) return { allowed: false, unavailable: true, retryAfter: 1 };
+  const keyHash = createHash("sha256")
+    .update(`${bucket}:${getClientIp(req)}`, "utf8")
+    .digest("hex");
+  try {
+    const { data, error } = await supabase.rpc("consume_api_rate_limit", {
+      p_key_hash: keyHash,
+      p_limit: limit,
+      p_window_seconds: Math.max(1, Math.ceil(windowMs / 1000)),
+    });
+    if (error) throw error;
+    const result = Array.isArray(data) ? data[0] : data;
+    if (!result || typeof result.allowed !== "boolean") {
+      throw new Error("INVALID_RATE_LIMIT_RESPONSE");
     }
+    return {
+      allowed: result.allowed,
+      retryAfter: Math.max(1, Number(result.retry_after) || 1),
+    };
+  } catch (error) {
+    console.error("Persistent rate limit unavailable:", error?.message || error);
+    return { allowed: false, unavailable: true, retryAfter: 1 };
   }
-
-  return {
-    allowed: state.count <= limit,
-    retryAfter: Math.max(1, Math.ceil((state.resetAt - now) / 1000)),
-  };
 }
 
 function send(res, status, data, origin) {
@@ -212,7 +213,11 @@ const server = createServer(async (req, res) => {
         bucket = "admin";
         limit = 180;
       }
-      const rate = checkRateLimit(req, bucket, limit, windowMs);
+      const rate = await checkRateLimit(req, bucket, limit, windowMs);
+      if (rate.unavailable) {
+        send(res, 503, { error: "RATE_LIMIT_STORE_UNAVAILABLE" }, origin);
+        return;
+      }
       if (!rate.allowed) {
         res.writeHead(429, {
           "Content-Type": "application/json; charset=utf-8",
